@@ -143,7 +143,8 @@ class TaskReadMCP(TaskMCP):
     contacts: list[TaskContactMCP]
     lapsed: bool = Field(
         description=(
-            "Still not done, and its due journal has passed or was cancelled. "
+            "Still not done, and its due journal has ended (its last day is "
+            "behind the user) or was cancelled. "
             "Only a task with no list lapses; a task on a list never does."
         )
     )

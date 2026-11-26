@@ -990,7 +990,7 @@ class JournalAttributes(BaseModel):
         default=None,
         description=(
             "How many not-done tasks are due in this journal, excluding lapsed "
-            "ones — a task whose due journal has passed or been cancelled. This "
+            "ones — a task whose due journal has ended or been cancelled. This "
             "is the journal list's 'tasks due' indicator; the detail view shows "
             "the tasks themselves. **Null means not computed, which is not the "
             "same as zero**: only the list endpoint runs the count, so a journal "

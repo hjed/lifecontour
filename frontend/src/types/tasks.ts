@@ -115,7 +115,8 @@ export interface TaskReadAttributes extends TaskAttributes {
   intermediate_journals: TaskJournalRef[];
   contacts: TaskContactRef[];
   /**
-   * Still not done, and the due journal has either passed or been cancelled.
+   * Still not done, and the due journal has either ended (its last day is
+   * behind the user) or been cancelled.
    * Derived on every read and never stored. Always `false` on a task on a
    * list: a list task never lapses.
    */

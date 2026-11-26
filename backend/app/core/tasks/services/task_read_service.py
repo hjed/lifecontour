@@ -115,7 +115,7 @@ def _persisted_list_id(task_list: TaskList) -> int:
 
 
 def _lapses_its_tasks(
-    journal_day: datetime.date, *, cancelled: bool, today: datetime.date
+    last_day: datetime.date, *, cancelled: bool, today: datetime.date
 ) -> bool:
     """Whether a not-done task due in this journal would already have lapsed.
 
@@ -132,7 +132,7 @@ def _lapses_its_tasks(
     return (
         derive_lapse_reason(
             status=TaskStatus.NOT_DONE,
-            due_journal_date=journal_day,
+            due_journal_last_day=last_day,
             due_journal_cancelled=cancelled,
             today=today,
         )
@@ -288,9 +288,10 @@ class TaskReadService:
     ) -> UpcomingTasks:
         """The not-done tasks due between today and ``days_ahead`` days ahead.
 
-        The dashboard's tasks section: "not-done tasks whose due journal falls
-        between today and seven days ahead, inclusive", soonest first, with
-        done, cancelled and lapsed tasks absent.
+        The dashboard's tasks section: not-done tasks whose due journal falls
+        between today and seven days ahead, inclusive — or is under way, when
+        the task is due today — soonest first, with done, cancelled and lapsed
+        tasks absent.
 
         **Today is the user's, not UTC's.** The timezone is resolved once and
         the window is built from it, so a user in Kiritimati is shown their
@@ -329,9 +330,10 @@ class TaskReadService:
                 in the new one. Raised by the pull request's automated review.
 
         Returns:
-            The window and its tasks, ordered by due-journal date then task id.
-            Journal-only: a task on a list is left out, even one due inside
-            the window.
+            The window and its tasks, in the order ``select_upcoming_tasks``
+            settles: by the day each is placed on, then task id. Journal-only
+            for now: the query leaves a task on a list out, even one due inside
+            the window, though the selection rule above it would admit one.
 
         Raises:
             TaskValidationError: ``days_ahead`` is negative or beyond the
@@ -719,7 +721,7 @@ class TaskReadService:
         in a journal is one of its not-done tasks, so it lights the badge. It
         never *lapses* — a late list task is overdue and stays on its list — but
         the journal-level rule here still drops the count once the journal has
-        passed or been cancelled. That is a choice about the badge, not a lapse
+        ended or been cancelled. That is a choice about the badge, not a lapse
         verdict on the task: the journal list does not keep a badge lit for
         lateness beyond its journal, as the dashboard shows an overdue task for
         only a week.
@@ -769,7 +771,7 @@ class TaskReadService:
             for journal in journals
             if journal.id in counts
             and not _lapses_its_tasks(
-                journal_date(journal, timezone),
+                journal_last_day(journal, timezone),
                 cancelled=journal.id in cancelled,
                 today=today,
             )

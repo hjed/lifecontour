@@ -691,6 +691,7 @@ def _task(
     task_id: int,
     *,
     due_date: date,
+    last_day: date | None = None,
     text: str = "book the venue",
     journal_title: str = "Monday standup",
     contacts: tuple[TaskContactRef, ...] = (),
@@ -705,7 +706,7 @@ def _task(
         id=900 + task_id,
         title=journal_title,
         date=due_date,
-        last_day=due_date,
+        last_day=last_day or due_date,
         cancelled=False,
     )
     return build_task_read_model(
@@ -750,6 +751,31 @@ class TestUpcomingTasksSection:
         assert "## Tasks Due Soon" in prompt
         assert "Due 27 Apr (today): book the venue" in prompt
         assert '(in "Monday standup")' in prompt
+
+    def test_a_task_in_a_journal_under_way_is_dated_today(self) -> None:
+        """A trip that started two days ago and ends tomorrow.
+
+        The task is due today until the trip ends, so the line says so with
+        today's date — not the trip's first day labelled "today", which would
+        contradict itself and the window the heading names.
+        """
+        builder = DailySummaryPromptBuilder()
+        task = _task(
+            1,
+            due_date=_TODAY - timedelta(days=2),
+            last_day=_TODAY + timedelta(days=1),
+            text="pack the head torch",
+            journal_title="Coast walk",
+        )
+
+        prompt = builder.build(
+            _make_input(summary_date=_TODAY, upcoming_tasks=_due_soon(task)),
+            now=_NOW,
+        )
+
+        assert "Due 27 Apr (today): pack the head torch" in prompt
+        assert '(in "Coast walk")' in prompt
+        assert "25 Apr" not in prompt
 
     def test_linked_contacts_travel_with_the_task(self) -> None:
         """The connective work needs the person, not just the commitment."""

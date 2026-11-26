@@ -215,9 +215,9 @@ Updating a task never requires a journal. The journal links describe where the t
 
 ### Lapsed tasks
 
-> **Partly superseded.** Only journal-only tasks lapse. A task on a list is marked overdue instead and stays open. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
+> **Partly superseded.** Only journal-only tasks lapse. A task on a list is marked overdue instead and stays open. A task due in a multi-day journal lapses only once that journal has **ended**, and is on the dashboard as due today while the journal is under way. See [Task Lists and Navigation](./task-lists-and-navigation-product-specification.md#superseded-behaviour).
 
-A task is **lapsed** when its due journal's date has passed and it is still not done. A task whose due journal has been cancelled is also treated as lapsed.
+A task is **lapsed** when its due journal has ended — its last day has passed — and it is still not done. A task whose due journal has been cancelled is also treated as lapsed.
 
 Lapsed tasks behave as follows:
 
@@ -385,7 +385,7 @@ The tasks section shows not-done tasks whose due journal falls between **today a
 
 Required behaviour:
 
-- Ordered by due journal date, soonest first.
+- Ordered by due journal date, soonest first; a task whose due journal is under way is due today, and is ordered among today's tasks.
 - Capped at **five** items, with a show-more that reveals the remainder of the seven-day window.
 - Each entry shows the task text, the due journal's title and date, and any linked contacts.
 - Each entry links to its due journal.

@@ -3630,6 +3630,42 @@ class TestListUpcomingTasksTool:
 
         assert [task["id"] for task in payload["tasks"]] == [near_task, far_task]
 
+    async def test_a_task_due_in_a_journal_under_way_is_listed_first(
+        self,
+        authenticated_lifespan_client,
+        clean_database: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A trip that started yesterday and ends tomorrow is due today.
+
+        The agent is told what the dashboard shows: the trip's task is live,
+        and it leads tomorrow's.
+        """
+        creating_id, _ = task_anchors
+        start = datetime.now(UTC) - timedelta(days=1)
+        trip_id = await create_journal(
+            journal_repository,
+            title="Coast walk",
+            start=start,
+            end=start + timedelta(days=2),
+        )
+        tomorrow_id = await create_journal(
+            journal_repository, title="Tomorrow", days_offset=1
+        )
+        tomorrow_task = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=tomorrow_id
+        )
+        trip_task = await create_task(
+            clean_database, creating_journal_id=creating_id, due_journal_id=trip_id
+        )
+
+        async with authenticated_lifespan_client() as client:
+            payload = await _list_upcoming_tasks(client)
+
+        assert [task["id"] for task in payload["tasks"]] == [trip_task, tomorrow_task]
+        assert payload["tasks"][0]["lapsed"] is False
+
     async def test_an_empty_window_still_names_its_dates(
         self, authenticated_lifespan_client
     ):

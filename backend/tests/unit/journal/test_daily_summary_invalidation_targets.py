@@ -195,11 +195,11 @@ class TestTargetsForAJournalChange:
 class TestTargetsForATaskChange:
     """A task's days follow its **due** journal, and the two halves differ.
 
-    Today's summary lists not-done tasks whose due journal *starts* inside the
-    week ahead; a past day's summary lists what was due in that day's journals,
-    which is the overlap set again. So a past span invalidates the days it
-    covers, and a future one invalidates today — never both, because a span
-    starting before today cannot start inside a window that begins at today.
+    Today's summary lists not-done tasks whose due journal overlaps the week
+    ahead and has not ended; a past day's summary lists what was due in that
+    day's journals, which is the overlap set again. So a past span invalidates
+    the days it covers, a future one invalidates today, and one under way
+    invalidates both — as one range, since the days run on into today.
     """
 
     window = upcoming_window(TODAY)
@@ -256,11 +256,13 @@ class TestTargetsForATaskChange:
 
         assert self._targets(span) == frozenset()
 
-    def test_a_span_crossing_today_invalidates_only_the_days_behind_it(self) -> None:
-        """It started before the window opens, so it is in no upcoming listing.
+    def test_a_span_crossing_today_invalidates_its_past_days_and_today(
+        self,
+    ) -> None:
+        """A journal under way: its days behind the user describe it, and it is
+        also on today's briefing, because its tasks are due today until it ends.
 
-        The days it covered before today still describe it, which is why the
-        past half is not empty.
+        One range rather than two, since the days are consecutive.
         """
         span = DaySpan(first_day=_day(25), last_day=_day(29))
 
@@ -268,7 +270,23 @@ class TestTargetsForATaskChange:
             {
                 InvalidationTarget(
                     user_id=USER_ID,
-                    span=DaySpan(first_day=_day(25), last_day=_day(26)),
+                    span=DaySpan(first_day=_day(25), last_day=TODAY),
                 )
             }
+        )
+
+    def test_a_span_ending_today_still_reaches_today(self) -> None:
+        """On the journal's last day its tasks are still due today."""
+        span = DaySpan(first_day=_day(24), last_day=TODAY)
+
+        assert self._targets(span) == frozenset(
+            {InvalidationTarget(user_id=USER_ID, span=span)}
+        )
+
+    def test_a_span_that_ended_yesterday_does_not_reach_today(self) -> None:
+        """Once it is over its tasks are late, and off today's briefing."""
+        span = DaySpan(first_day=_day(22), last_day=_day(26))
+
+        assert self._targets(span) == frozenset(
+            {InvalidationTarget(user_id=USER_ID, span=span)}
         )

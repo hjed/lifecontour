@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core_shared.models.contacts.important_date_types import ImportantDateType
-from core_shared.models.tasks import LapseReason, TaskStatus
+from core_shared.models.tasks import LapseReason, TaskStatus, upcoming_task_day
 
 from app.core.settings.timezone_utils import (
     DEFAULT_TIMEZONE,
@@ -512,9 +512,12 @@ class DailySummaryPromptBuilder:
         # Every task here was selected as journal-only, so it has a due
         # journal; a list task reaching this line is a broken selection.
         due_journal = model.require_journal("due")
+        # The day the dashboard places it on: its due journal's date, or today
+        # for one due in a journal already under way, so the line never names
+        # a start day the user is past and calls it "today".
+        due_day = upcoming_task_day(model, today)
         parts = [
-            f"Due {due_journal.date:%d %b} "
-            f"({cls._relative_day(due_journal.date, today)}):",
+            f"Due {due_day:%d %b} ({cls._relative_day(due_day, today)}):",
             _capped(model.task.text, MAX_TASK_TEXT_LENGTH),
             f'(in "{due_journal.title}")',
         ]
@@ -733,10 +736,9 @@ class DailySummaryPromptBuilder:
             return "still not done; lapsed, its due journal was cancelled"
         if model.lapse_reason is LapseReason.DATE_PASSED:
             return "still not done; lapsed, the day passed"
-        # Unreachable through this section: a not-done task due in a journal of a
-        # day already behind today has lapsed by one cause or the other. Kept, and
-        # worded as the plain truth about the task, because inventing a phrase for
-        # a state that would mean the guards were wrong is worse than saying less.
+        # A not-done task due in a journal that is still under way: the day being
+        # summarised is behind the user, but the journal runs on past it, so the
+        # task has not lapsed — it lapses only once the journal has ended.
         return "still not done"
 
     @staticmethod
@@ -744,9 +746,10 @@ class DailySummaryPromptBuilder:
         """How far off a due date is, in the words a person would use."""
         days = (due - today).days
         if days <= 0:
-            # A forward window starts today, so a negative gap is unreachable
-            # through the listing; reading it as "today" beats inventing a
-            # phrase for a case that would mean the window was built wrong.
+            # Every task reaching this line is placed on today or later — one
+            # under way is placed on today — so a negative gap would mean the
+            # placement was skipped; reading it as "today" beats inventing a
+            # phrase for that.
             return "today"
         if days == 1:
             return "tomorrow"

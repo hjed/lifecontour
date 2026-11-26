@@ -426,7 +426,7 @@ async def delete_task_list(
 
     Every task on the list is deleted with it, open or completed, except a task
     that has both a creating and a due journal: that one is kept as a
-    journal-only task on no list (lapsed if its due journal has passed). The
+    journal-only task on no list (lapsed if its due journal has ended). The
     answer names both sets of task ids. The list's history stays readable with
     ``get_task_list_history``, ending in ``__deleted__``.
 

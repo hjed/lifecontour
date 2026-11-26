@@ -4491,6 +4491,53 @@ class TestListUpcomingTasksEndpoint:
             str(task_id)
         ]
 
+    async def test_a_task_due_in_a_journal_under_way_is_listed_and_live(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_repository: SqlJournalRepository,
+        task_anchors: tuple[int, int],
+    ):
+        """A trip that started yesterday and ends tomorrow has not passed.
+
+        Its date is behind the window, but the task lapses only once the trip's
+        last day has ended, so it is listed and reads as live; the day after
+        the trip it lapses.
+        """
+        creating_id, _ = task_anchors
+        start = datetime.now(UTC) - timedelta(days=1)
+        under_way_id = await create_journal(
+            journal_repository,
+            title="Coast walk",
+            start=start,
+            end=start + timedelta(days=2),
+        )
+        task_id = await create_task(
+            async_connection,
+            creating_journal_id=creating_id,
+            due_journal_id=under_way_id,
+        )
+        ended_start = datetime.now(UTC) - timedelta(days=4)
+        ended_id = await create_journal(
+            journal_repository,
+            title="Last week's trip",
+            start=ended_start,
+            end=ended_start + timedelta(days=3, hours=-1),
+        )
+        ended_task_id = await create_task(
+            async_connection, creating_journal_id=creating_id, due_journal_id=ended_id
+        )
+
+        upcoming = await authenticated_client.get("/api/tasks/upcoming")
+        read_back = await authenticated_client.get(f"/api/tasks/{task_id}")
+        ended = await authenticated_client.get(f"/api/tasks/{ended_task_id}")
+
+        assert [resource["id"] for resource in upcoming.json()["data"]] == [
+            str(task_id)
+        ]
+        assert read_back.json()["data"]["attributes"]["lapsed"] is False
+        assert ended.json()["data"]["attributes"]["lapse_reason"] == "date_passed"
+
     async def test_a_task_whose_due_journal_has_passed_is_not_listed(
         self,
         authenticated_client: AsyncClient,

@@ -386,7 +386,12 @@ class TaskRepository(ABC):
         window_start: datetime,
         window_end: datetime,
     ) -> list[Task]:
-        """The user's not-done journal-only tasks whose due journal starts in a window.
+        """The user's not-done journal-only tasks whose due journal overlaps a window.
+
+        **Overlap**, not "starts in": a task due in a journal that is under way —
+        started before the window, ends inside or after it — is due today, and
+        lapses only once that journal has ended. A journal that ended before
+        the window is out.
 
         **Journal-only**: a task on a list is left out even when it is due in
         a journal inside the window. The dashboard, ``list_upcoming_tasks`` and
@@ -554,7 +559,7 @@ class TaskRepository(ABC):
 
         **List tasks count.** A list task due in a journal is one of that
         journal's not-done tasks, so it lights the indicator the same way. The
-        caller's rule that hides the count once the journal has passed or been
+        caller's rule that hides the count once the journal has ended or been
         cancelled applies to it too: the journal list does not keep a badge lit
         for a list task's lateness beyond its journal.
 

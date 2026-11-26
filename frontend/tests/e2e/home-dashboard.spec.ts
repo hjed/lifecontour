@@ -1737,6 +1737,53 @@ test.describe('Home Dashboard — the tasks card', () => {
     expect(stored.attributes.text).toBe('Tasks card confirm the caterer');
   });
 
+  test('keeps a task due in a journal under way on the card as due today, not lapsed', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    // Due in a journal two days out, then the journal is moved to run from
+    // yesterday to tomorrow: no task call can create one due in a journal
+    // that has already started, so the journal moves instead. Its first day is
+    // behind the window, but the task is not late until the journal has
+    // ended.
+    const { task, dueJournal } = await createDashboardTask(
+      dataManager,
+      day,
+      'Tasks card pack the head torch'
+    );
+    const moved = await dataManager.moveJournalToInProgress(dueJournal.id);
+    expect(moved.status()).toBe(200);
+
+    // The phone width every UI change is checked at.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openDashboard(page);
+
+    const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId('dashboard-task-chip')).toHaveText('Today');
+    await expect(
+      row.getByRole('link', { name: dueJournal.title })
+    ).toHaveAttribute('href', `/journals/${dueJournal.id}`);
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+
+    // And on the journal it is due in, it is live: no lapsed marker.
+    await page.goto(`/journals/${dueJournal.id}`);
+    const journalRow = page
+      .getByTestId('journal-tasks-section')
+      .getByTestId(`journal-task-${task.id}`);
+    await expect(journalRow).toBeVisible();
+    await expect(journalRow.getByTestId('journal-task-lapsed')).toHaveCount(0);
+  });
+
   /**
    * The structural sweep ITER18-004 Phase 17 owns (**W22**, **W25**, **W28**,
    * **W29**).

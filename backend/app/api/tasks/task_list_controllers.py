@@ -400,7 +400,7 @@ async def delete_task_list(
 
     Every task on the list goes with it — open or completed — except a task
     holding both a creating and a due journal: that one stays as a journal-only
-    task, off any list, and reads as lapsed if its journal has passed. The
+    task, off any list, and reads as lapsed if its journal has ended. The
     list's history stays readable by you at
     `GET /api/task-lists/{list_id}/history`, ending in a deletion entry.
 

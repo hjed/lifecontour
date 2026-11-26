@@ -34,6 +34,7 @@ Builds on and refines:
 | Out of scope: global tasks page, priorities, recurring tasks, tasks in search | Tasks section, a single flag, recurrence for list tasks, and open tasks and lists in search are in scope. Effort and scheduling remain out. |
 | *Tasks over MCP*: an agent cannot create a task without both anchors; "no separate task list and no due date" | An agent may create a task on a list with neither anchor. Guidance rewritten. |
 | Dashboard Tasks card: journal-due tasks only | Extended (see *Dashboard and Daily Summary*). |
+| *Lapsed tasks*: a task lapses once its due journal's date has passed | Once its due journal has **ended** (its last day has passed). While a multi-day due journal is under way its tasks are due today, on the dashboard and in the briefing, for journal-only and list tasks alike (see *Which day counts*). |
 
 Everything else in that specification — statuses, retargeting and its acknowledgement, lapse and resurrection for journal-only tasks, contacts on tasks, tasks as a read-only record on contact pages, contact merge, history, the dashboard's other cards — continues to apply unless stated here.
 
@@ -146,7 +147,7 @@ A task has:
 ### Core invariants
 
 1. A task has a list, a due journal, or both. It can never have neither.
-2. A task with no list is a **journal-only task** and follows the existing specification in full: creating journal and due journal both required, due journal in the future when set, lapse when it passes.
+2. A task with no list is a **journal-only task** and follows the existing specification in full: creating journal and due journal both required, due journal in the future when set, lapse once that journal has ended.
 3. A task is on at most one list.
 4. A task has a due date **or** a due journal, never both. When it has a due journal, that journal's date is its date.
 5. A due date may only be set on a task that is on a list.
@@ -157,14 +158,14 @@ A task has:
 
 | Task | Date comes from | After the date passes |
 |---|---|---|
-| Journal-only | Due journal | **Lapses** (unchanged): goes quiet everywhere, revived by retargeting |
+| Journal-only | Due journal | **Lapses** once the due journal has ended: goes quiet everywhere, revived by retargeting |
 | On a list, with due date | Its own due date | **Overdue**: stays open on its list, marked overdue |
 | On a list, with due journal | Due journal | **Overdue**, same as above |
 | On a list, undated | — | Nothing; it simply lives on the list |
 
-**Which day counts.** A journal's date, for every task purpose, remains the start of its event range in the user's timezone — when a task is due, when a journal enters the upcoming window, whether a due journal is "in the future", and when a journal-only task lapses are all unchanged. The new list behaviours that wait for a journal to be *over* — a list task becoming overdue, an instance list auto-archiving, series regeneration moving on — wait until the journal's **last** day has ended, so a multi-day trip's packing list is not overdue on day two.
+**Which day counts.** A journal's date remains the start of its event range in the user's timezone: it is the day a task due in it is due, the day it enters the upcoming window, and the day that decides whether a due journal is "in the future" (so a task cannot newly be made due in a journal already under way). Everything that waits for a journal to be *over* waits until its **last** day has ended — a journal-only task **lapsing**, a list task becoming overdue, an instance list auto-archiving, series regeneration moving on — so a multi-day trip's commitments are neither lapsed nor overdue on day two. One rule for both kinds of task: a task due in a journal is late only once the journal has ended. While the journal is under way its open tasks are **due today**: they show on the dashboard and in today's briefing as today's.
 
-An overdue task stays on the dashboard for **seven days** after its date. After that it leaves the dashboard but remains open and marked overdue on its list until it is done, cancelled or re-dated.
+An overdue task stays on the dashboard for **seven days** after it became overdue — after its due date, or after its due journal's last day. After that it leaves the dashboard but remains open and marked overdue on its list until it is done, cancelled or re-dated.
 
 **Setting and changing a list task's date:**
 
@@ -361,8 +362,9 @@ The card keeps its current size and show-more behaviour. Its contents become:
 
 | Shown | Rule |
 |---|---|
-| Journal-only tasks | Unchanged: due journal within the upcoming window, not lapsed |
+| Journal-only tasks | Due journal within the upcoming window, not lapsed |
 | Dated list tasks | Due date or due journal within the upcoming window |
+| Tasks due in a journal under way | Journal-only or list tasks whose due journal has started but not ended: shown as due today |
 | Overdue list tasks | Up to seven days past their date, marked overdue |
 | Undated list tasks | Only when their list is associated with a journal within the upcoming window |
 

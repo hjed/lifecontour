@@ -383,7 +383,10 @@ class DashboardTaskSchema(BaseModel):
         ...,
         description=(
             "How many days from the window's first day the task is due, `0` "
-            "meaning today. The window's first day is `meta.anchor.date`, so a "
+            "meaning today — including a task due in a journal that is under "
+            "way, which is due today until the journal ends, though its "
+            "`due_journal.date` is the day the journal started. The window's "
+            "first day is `meta.anchor.date`, so a "
             "chip reading `Today` and the page's own header cannot disagree. "
             "Sent rather than left to be derived, because subtracting dates in "
             "the browser's zone can land a day out near midnight."

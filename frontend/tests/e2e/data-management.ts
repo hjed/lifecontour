@@ -1482,6 +1482,46 @@ export class TestDataManager {
   }
 
   /**
+   * Move a journal's event date range so it is under way: it started
+   * `startedDaysAgo` days ago and ends `endsInDays` days from now, in UTC.
+   *
+   * The same recipe as {@link moveJournalToPast}, for the other side of the
+   * date rule: a task due in a journal that has started but not ended has not
+   * passed — it lapses only once the journal's last day is over — and the
+   * dashboard shows it as due today. No task call can make one, because a due
+   * journal must start in the future when it is set, so the journal moves.
+   * Both ends sit at midday UTC, clear of the day boundary the e2e user's
+   * dashboard is anchored on.
+   *
+   * The response is returned for the spec to assert, for the reason
+   * {@link moveJournalToPast} gives.
+   */
+  async moveJournalToInProgress(
+    journalId: string,
+    { startedDaysAgo = 1, endsInDays = 1 } = {}
+  ): Promise<APIResponse> {
+    console.debug(
+      `⏯️ [Data Manager] Moving journal ${journalId} to run from ${startedDaysAgo} day(s) ago to ${endsInDays} day(s) ahead`
+    );
+
+    return this.page.request.patch(`/api/journals/${journalId}`, {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: {
+          type: 'journals',
+          id: journalId,
+          attributes: {
+            event_date_range: {
+              start: utcDayOffset(-startedDaysAgo),
+              end: utcDayOffset(endsInDays),
+            },
+          },
+        },
+      }),
+    });
+  }
+
+  /**
    * Delete every journal that has not already ended, so no future journal exists.
    *
    * The empty-picker spec needs the *absence* of future journals, which no

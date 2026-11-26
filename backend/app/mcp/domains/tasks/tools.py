@@ -562,7 +562,7 @@ async def remove_task_from_list(
 
     The answer is the task as get_task reads it, and says whether it is now
     **lapsed**: off its list it follows the journal-only rule again, so a task
-    whose due journal has already passed, or was cancelled, is lapsed the moment
+    whose due journal has already ended, or was cancelled, is lapsed the moment
     it leaves. Tell the user when that happens.
 
     Removing a task that is on no list changes nothing. A task on an archived
@@ -984,7 +984,8 @@ async def get_task(
     to describe the task to the user.
 
     A task is **lapsed** when it is still not done and its due journal has either
-    passed or been **cancelled**. Nothing lapses a done or cancelled task, and a
+    **ended** — its last day is behind the user, so a task due in a multi-day
+    trip that is still under way is not lapsed — or been **cancelled**. Nothing lapses a done or cancelled task, and a
     task on a list never lapses: it may have no journal at all, or only one,
     and the missing journal and its id come back as null. The
     reason says which of the two happened, because they call for different
@@ -1121,9 +1122,12 @@ async def list_upcoming_tasks(
 
     **Done, cancelled and lapsed tasks are all absent**, so this is what is
     genuinely outstanding rather than everything that exists. A task lapses when
-    it is still not done and its due journal has passed or been **cancelled** —
+    it is still not done and its due journal has ended or been **cancelled** —
     inside a forward window it is the cancellation that does it, when a meeting
-    a commitment was pinned to was called off. **Tasks on a list are absent
+    a commitment was pinned to was called off. A task due in a multi-day journal
+    that is **under way** is listed as due today, among today's tasks, though
+    its due journal's date is the day the journal started: it is not late
+    until the journal has ended. **Tasks on a list are absent
     too**, even one due in a journal inside the window: this lists journal-only
     commitments, the ones the user's dashboard shows.
 

@@ -307,6 +307,9 @@ class TestTheConfiguredTimezoneDecides:
             journal_repository,
             title="Late in Sydney",
             start=JOURNAL_AT_SYDNEY_LATE_EVENING,
+            # A moment, not the fixture's default hour: an hour would run past
+            # local midnight, and a task lapses only once its journal has ended.
+            end=JOURNAL_AT_SYDNEY_LATE_EVENING,
         )
         await create_task(
             async_connection, creating_journal_id=creating_id, due_journal_id=due_id
@@ -337,6 +340,9 @@ class TestTheConfiguredTimezoneDecides:
             journal_repository,
             title="Late in Sydney",
             start=JOURNAL_AT_SYDNEY_LATE_EVENING,
+            # A moment, not the fixture's default hour: an hour would run past
+            # local midnight, and a task lapses only once its journal has ended.
+            end=JOURNAL_AT_SYDNEY_LATE_EVENING,
         )
         await create_task(
             async_connection, creating_journal_id=creating_id, due_journal_id=due_id

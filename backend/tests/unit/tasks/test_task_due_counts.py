@@ -69,14 +69,21 @@ YESTERDAY = NOON - datetime.timedelta(days=1)
 TOMORROW = NOON + datetime.timedelta(days=1)
 
 
-def make_journal(journal_id: int, start: datetime.datetime) -> Journal:
-    """A persisted journal, as the list endpoint has already loaded it."""
+def make_journal(
+    journal_id: int,
+    start: datetime.datetime,
+    end: datetime.datetime | None = None,
+) -> Journal:
+    """A persisted journal, as the list endpoint has already loaded it.
+
+    A point in time unless ``end`` is given, for the multi-day cases.
+    """
     return Journal(
         id=journal_id,
         user_id=USER_ID,
         title=f"Journal {journal_id}",
         content="content",
-        event_date_range=EventDateRange(start=start, end=start),
+        event_date_range=EventDateRange(start=start, end=end or start),
     )
 
 
@@ -230,6 +237,36 @@ class TestLapsedCommitmentsDoNotCount:
         )
 
         assert counts == {BUSY_JOURNAL_ID: 1}
+
+    async def test_an_in_progress_journal_still_counts(
+        self, counting_service: TaskReadService
+    ) -> None:
+        """A trip that started yesterday and ends tomorrow has not passed.
+
+        Its tasks lapse only once its last day has ended, so the badge stays
+        lit for the whole journal rather than going dark on day two.
+        """
+        counts = await counting_service.due_task_counts(
+            USER_ID, [make_journal(BUSY_JOURNAL_ID, YESTERDAY, TOMORROW)], now=NOON
+        )
+
+        assert counts == {BUSY_JOURNAL_ID: 1}
+
+    async def test_a_multi_day_journal_that_ended_yesterday_lights_nothing(
+        self, counting_service: TaskReadService
+    ) -> None:
+        """Once its last day has ended its commitments have lapsed."""
+        counts = await counting_service.due_task_counts(
+            USER_ID,
+            [
+                make_journal(
+                    BUSY_JOURNAL_ID, YESTERDAY - datetime.timedelta(days=3), YESTERDAY
+                )
+            ],
+            now=NOON,
+        )
+
+        assert counts == {}
 
     async def test_a_cancelled_journal_lights_nothing_even_when_future_dated(
         self,
