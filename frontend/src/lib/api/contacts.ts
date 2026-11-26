@@ -55,6 +55,7 @@ import {
 import { sendConditional, type ConditionalResult } from './conditional-request';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 import { taskKeys } from './tasks';
+import { historyKeys } from './contact-history-keys';
 import {
   unwrapResource,
   updateResource,
@@ -767,11 +768,7 @@ export function useUpdateContactField(contactId: string) {
 }
 
 // Contact History API Functions
-export const historyKeys = {
-  all: ['contact-history'] as const,
-  list: (contactId: string, page?: number, limit?: number) =>
-    [...historyKeys.all, contactId, { page, limit }] as const,
-};
+export { historyKeys };
 
 export async function fetchContactHistory(
   contactId: string,

@@ -349,6 +349,61 @@ send no `If-Match` and share no write scope. A new edit hook:
   move renumbers `position`. The helpers in `lib/api/cached-order.ts` move row
   objects and never rebuild them, so a field patched meanwhile survives a
   move, a re-sort and a rollback alike.
+- **A list's tasks** (`lib/api/list-tasks.ts`) are read open
+  (`useTaskListOpenTasks`, unpaginated, `meta.total`) and completed
+  (`useTaskListCompletedTasks`, an infinite query). The *Completed* group pages
+  by page **number** from `meta` (`current_page < page_count`), never by
+  following `links.next`: the backend builds links as absolute URLs from its own
+  base URL, which need not be the browser's origin. Because the group is an
+  infinite query under `taskKeys`, the optimistic patch and its rollback walk a
+  cached `{ pages: [{ data }] }` as well as `{ data }`. Accepted cost: a status
+  tick's `cancelQueries(taskKeys.all)` also cancels an in-flight list read; the
+  refresh that follows re-reads an open list, but a cancelled `fetchNextPage` is
+  not re-requested.
+- **A task reorder is not a task write.** `useReorderListTask` carries
+  `TASK_REORDER_KEY`, not `TASK_WRITE_KEY`: it records no history and moves no
+  count, so counted as a task write it would hold back a status change's
+  refresh (`isLastTaskWrite`) and the dashboard's on-load summary read for the
+  length of a drag. It moves the row at once and re-sorts the cached **read
+  models** by the answer's ids (the answer is the write shape, without journals
+  or contacts), never replacing them. Overlapping reorders on one list settle
+  as list moves do (`move-sequence.ts`, scoped per list so one list never
+  waits on another): the last to settle takes the answer only if it is also
+  the newest, confirming it with a re-read if reorders overlapped, and
+  anything else re-reads; a lone failure first puts back only
+  the order. A read of the list started mid-drag and still running as the
+  reorder settles is cancelled before the answer is applied, then re-read. A 409 `TASK_LIST_CHANGED` re-reads the list without a toast and
+  leaves the retry to the caller.
+  Accepted: a task write's refetch landing mid-reorder shows the server's
+  previous order until the reorder's answer re-sorts it. Moving a task onto or
+  between lists and taking it off one (`useMoveTaskToList`,
+  `useRemoveTaskFromList`) are task writes and refresh both lists, their counts
+  and the contact history on settle, so a failure refreshes too. The shared
+  collections are refreshed by the last task write standing, as `useUpdateTask`
+  does, which also covers a status change that skipped its refresh behind one
+  of them; the task's own detail and history and the contact history are
+  refreshed whatever else is pending, because the last writer refreshes those
+  only for its own task. The removal stores and returns the
+  read model, whose `lapsed` says whether the task lapsed on leaving — but
+  stores it only while it is the newest write on the task (`taskStoreScope`):
+  `useDeleteTask` takes part in the same sequence, so a removal answering after
+  the task was deleted cannot recreate its detail.
+- **A skipped shared refresh is owed, and the last task write repays it.** A
+  task write settling while another is out skips refreshing the shared
+  surfaces (`isLastTaskWrite`): the journal listings, upcoming window, list
+  reads and counts, dashboard and due counts. `useUpdateTask` and the list
+  moves record that as owed (`deferSharedRefresh`), and **every** task write's
+  `onSettled` calls `settleTaskWrite`, which repays it once it is the last
+  one standing, success or failure. Most task writes refresh only on success,
+  so without this a failed write left last would refresh nothing. A creation,
+  which `isTaskWrite` does not count, is last only when no task write is
+  pending at all.
+- **A task write that puts a row on a contact's feed refreshes it.**
+  Creating a task with contacts (journal or list), linking or unlinking a
+  contact, and moving a task onto, between or off lists name the contact
+  history (`historyKeys`, now in `lib/api/contact-history-keys.ts` so the task
+  clients can import it without the `contacts.ts` ↔ `tasks.ts` cycle; still
+  re-exported from `contacts.ts`). A create with no contacts does not.
 - **Icon keys** (`types/task-icons.ts`, `TASK_ICONS`) are copied from the
   backend `TaskIcon` enum, as every mirrored backend enum is; the set is
   add-only.

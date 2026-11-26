@@ -29,6 +29,7 @@ import {
   useMutationState,
   useQuery,
   useQueryClient,
+  type InvalidateQueryFilters,
   type QueryClient,
   type Mutation,
 } from '@tanstack/react-query';
@@ -61,6 +62,8 @@ import { invalidateAfterMutation } from './invalidate-after-mutation';
 // breaks partial-mock tests — see the header of `journal-keys.ts`.
 import { journalKeys } from './journal-keys';
 import { taskListKeys } from './task-list-keys';
+import { settleMove, startMove } from './move-sequence';
+import { REFRESH_CONTACT_HISTORY } from './contact-history-keys';
 // Safe to import whole, unlike the journal client above: `home-dashboard.ts`
 // is a leaf — it imports the shared types and constants and nothing from this
 // layer — so there is no cycle to close.
@@ -605,8 +608,12 @@ const REFRESH_HOME_DASHBOARD = { queryKey: homeDashboardKeys.all };
  */
 const REFRESH_LIST_COUNTS = { queryKey: taskListKeys.listings() };
 
-function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
-  return invalidateAfterMutation(queryClient, ...taskFilters(taskId));
+function refreshTask(
+  queryClient: QueryClient,
+  taskId: string,
+  ...extra: InvalidateQueryFilters[]
+): Promise<void> {
+  return invalidateAfterMutation(queryClient, ...taskFilters(taskId), ...extra);
 }
 
 /**
@@ -640,13 +647,17 @@ function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
  */
 export function refreshTaskAndDueCounts(
   queryClient: QueryClient,
-  taskId: string
+  taskId: string,
+  ...extra: InvalidateQueryFilters[]
 ): Promise<void> {
   return invalidateAfterMutation(
     queryClient,
     ...taskFilters(taskId),
     { queryKey: journalKeys.lists() },
-    REFRESH_LIST_COUNTS
+    REFRESH_LIST_COUNTS,
+    // A caller's own reach, in the same call so every key set is cancelled
+    // before any is invalidated.
+    ...extra
   );
 }
 
@@ -661,7 +672,8 @@ export function refreshTaskAndDueCounts(
  * unconditional here where {@link refreshTaskAndDueCounts} is the opt-in form.
  */
 export function refreshTaskCollections(
-  queryClient: QueryClient
+  queryClient: QueryClient,
+  ...extra: InvalidateQueryFilters[]
 ): Promise<void> {
   return invalidateAfterMutation(
     queryClient,
@@ -670,7 +682,8 @@ export function refreshTaskCollections(
     { queryKey: taskKeys.onLists() },
     REFRESH_HOME_DASHBOARD,
     { queryKey: journalKeys.lists() },
-    REFRESH_LIST_COUNTS
+    REFRESH_LIST_COUNTS,
+    ...extra
   );
 }
 
@@ -738,15 +751,31 @@ interface CachedTaskResource {
 }
 
 /**
- * A cached payload embedding task resources.
+ * One response embedding task resources.
  *
  * Two shapes, because a task's attributes are *embedded* rather than pointed
- * at: the single-resource detail read, and the array-shaped journal listing and
- * upcoming window. Patching one and not the other would leave a namespace
- * showing the status the user just changed.
+ * at: the single-resource detail read, and the array-shaped journal listing,
+ * upcoming window and list reads. Patching one and not the other would leave a
+ * namespace showing the status the user just changed.
  */
-interface CachedTaskPayload {
+interface CachedTaskPage {
   readonly data: CachedTaskResource | readonly CachedTaskResource[];
+}
+
+/**
+ * An infinite query's cache — a list's *Completed* group — which holds its
+ * responses under `pages` rather than one at the top level.
+ */
+interface CachedTaskPages {
+  readonly pages: readonly CachedTaskPage[];
+  readonly pageParams: readonly unknown[];
+}
+
+/** Any cached payload under `taskKeys`. */
+type CachedTaskPayload = CachedTaskPage | CachedTaskPages;
+
+function isPaged(cached: CachedTaskPayload): cached is CachedTaskPages {
+  return 'pages' in cached;
 }
 
 /** What a status write changes about a task, beyond the status itself. */
@@ -798,7 +827,27 @@ function patchResource(
     : resource;
 }
 
-/** Applies a patch to whichever of the two cached shapes was handed over. */
+function patchPage(
+  page: CachedTaskPage,
+  taskId: string,
+  patch: OptimisticTaskPatch
+): CachedTaskPage {
+  const { data } = page;
+
+  if (Array.isArray(data)) {
+    return {
+      ...page,
+      data: data.map(resource => patchResource(resource, taskId, patch)),
+    };
+  }
+
+  return {
+    ...page,
+    data: patchResource(data as CachedTaskResource, taskId, patch),
+  };
+}
+
+/** Applies a patch to whichever cached shape was handed over. */
 function patchCachedTask(
   cached: CachedTaskPayload | undefined,
   taskId: string,
@@ -806,19 +855,28 @@ function patchCachedTask(
 ): CachedTaskPayload | undefined {
   if (!cached) return cached;
 
-  const { data } = cached;
-
-  if (Array.isArray(data)) {
+  if (isPaged(cached)) {
     return {
       ...cached,
-      data: data.map(resource => patchResource(resource, taskId, patch)),
+      pages: cached.pages.map(page => patchPage(page, taskId, patch)),
     };
   }
 
-  return {
-    ...cached,
-    data: patchResource(data as CachedTaskResource, taskId, patch),
-  };
+  return patchPage(cached, taskId, patch);
+}
+
+function findInPage(
+  page: CachedTaskPage,
+  taskId: string
+): CachedTaskResource | undefined {
+  const { data } = page;
+
+  if (Array.isArray(data)) {
+    return data.find(resource => resource.id === taskId);
+  }
+
+  const single = data as CachedTaskResource | undefined;
+  return single?.id === taskId ? single : undefined;
 }
 
 /** Finds one task inside a cached payload, whichever shape it is in. */
@@ -828,14 +886,15 @@ function findCachedTask(
 ): CachedTaskResource | undefined {
   if (!cached) return undefined;
 
-  const { data } = cached;
-
-  if (Array.isArray(data)) {
-    return data.find(resource => resource.id === taskId);
+  if (isPaged(cached)) {
+    for (const page of cached.pages) {
+      const found = findInPage(page, taskId);
+      if (found) return found;
+    }
+    return undefined;
   }
 
-  const single = data as CachedTaskResource | undefined;
-  return single?.id === taskId ? single : undefined;
+  return findInPage(cached, taskId);
 }
 
 /** The attributes an optimistic patch can overwrite, and so must restore. */
@@ -1091,8 +1150,57 @@ function leavesDashboardSection(status: TaskStatus | undefined): boolean {
  * Nothing is lost when a write skips: whichever settles last refetches, and it
  * refetches on the failure path too.
  */
-function isLastTaskWrite(queryClient: QueryClient): boolean {
+/**
+ * The scope writes that store a task's answer as its detail are sequenced in,
+ * with the task's deletion (`move-sequence.ts`): an answer is stored only
+ * while no newer such write — a delete included — has started on the task.
+ */
+export const taskStoreScope = (taskId: string) => `task:${taskId}`;
+
+export function isLastTaskWrite(queryClient: QueryClient): boolean {
   return queryClient.isMutating({ predicate: isTaskWrite }) <= 1;
+}
+
+/**
+ * Clients owing a shared refresh that a task write skipped.
+ *
+ * A write that settles while another is out skips refreshing the shared
+ * surfaces (`isLastTaskWrite`), on the promise that the last one standing
+ * will. Most task writes refresh only on success, so that promise has to be
+ * kept somewhere a *failure* reaches too: a write that skips records the debt
+ * here, and every task write repays it on settle (`settleTaskWrite`) once it
+ * is the last one standing — whether it succeeded or not.
+ */
+const owedSharedRefresh = new WeakSet<QueryClient>();
+
+/** Records that a task write skipped the shared refresh. */
+export function deferSharedRefresh(queryClient: QueryClient): void {
+  owedSharedRefresh.add(queryClient);
+}
+
+/** A write about to run the shared refresh itself settles any debt with it. */
+export function repaidSharedRefresh(queryClient: QueryClient): void {
+  owedSharedRefresh.delete(queryClient);
+}
+
+/**
+ * Every task write's `onSettled`: if a shared refresh is owed and this is the
+ * last task write standing, run it now.
+ *
+ * A creation is not counted by `isTaskWrite` (it has no task id yet), so it
+ * passes `countsItself: false` and is last only when no task write is pending
+ * at all.
+ */
+export function settleTaskWrite(
+  queryClient: QueryClient,
+  { countsItself = true }: { countsItself?: boolean } = {}
+): void {
+  const pending = queryClient.isMutating({ predicate: isTaskWrite });
+  const last = countsItself ? pending <= 1 : pending === 0;
+  if (!owedSharedRefresh.has(queryClient) || !last) return;
+
+  repaidSharedRefresh(queryClient);
+  void refreshTaskCollections(queryClient);
 }
 
 /**
@@ -1282,11 +1390,16 @@ export function useCreateTask() {
   return useMutation({
     ...TASK_WRITE,
     mutationFn: createTask,
-    onSuccess: () => {
-      void refreshTaskCollections(queryClient);
+    onSuccess: (_, { contact_ids }) => {
+      // Each linked contact's feed gains a row.
+      void refreshTaskCollections(
+        queryClient,
+        ...(contact_ids?.length ? [REFRESH_CONTACT_HISTORY] : [])
+      );
       toast.success(SUCCESS_MESSAGES.TASK_CREATED);
     },
     onError: reportFailure,
+    onSettled: () => settleTaskWrite(queryClient, { countsItself: false }),
   });
 }
 
@@ -1364,10 +1477,12 @@ export function useUpdateTask() {
       // Only the last task write standing refreshes the shared surfaces — see
       // `isLastTaskWrite`. Refreshing them while another is in flight would
       // answer from a server that has not processed it, undoing its optimistic
-      // removal on screen. But that write refreshes them for *its* task only,
-      // so this task's own detail and history are refreshed here regardless:
-      // a due date or due journal sent here is not patched optimistically.
+      // removal on screen; the skipped refresh is owed, and whichever write
+      // settles last repays it. But that write refreshes its own task only, so
+      // this task's detail and history are refreshed here regardless: a due
+      // date or due journal sent here is not patched optimistically.
       if (!isLastTaskWrite(queryClient)) {
+        deferSharedRefresh(queryClient);
         void invalidateAfterMutation(
           queryClient,
           { queryKey: taskKeys.detail(taskId) },
@@ -1375,6 +1490,7 @@ export function useUpdateTask() {
         );
         return;
       }
+      repaidSharedRefresh(queryClient);
 
       // The due counts go in the same call because a PATCH may carry a status,
       // and a status change is exactly what adds a commitment to a journal's
@@ -1417,6 +1533,7 @@ export function useRetargetTask() {
       }
       reportFailure(error);
     },
+    onSettled: () => settleTaskWrite(queryClient),
   });
 }
 
@@ -1432,12 +1549,21 @@ export function useDeleteTask() {
   return useMutation({
     ...TASK_WRITE,
     mutationFn: deleteTask,
+    // Supersedes any write still out on the task that would store its answer
+    // (`useRemoveTaskFromList`), so a late answer cannot recreate the detail.
+    onMutate: (taskId: string) => {
+      startMove(queryClient, taskStoreScope(taskId), false);
+    },
     onSuccess: (_, taskId) => {
       forgetTask(queryClient, taskId);
       void refreshTaskCollections(queryClient);
       toast.success(SUCCESS_MESSAGES.TASK_DELETED);
     },
     onError: reportFailure,
+    onSettled: (_data, _error, taskId) => {
+      settleMove(queryClient, taskStoreScope(taskId));
+      settleTaskWrite(queryClient);
+    },
   });
 }
 
@@ -1449,10 +1575,12 @@ export function useLinkTaskContact() {
     ...TASK_WRITE,
     mutationFn: linkTaskContact,
     onSuccess: (_, { taskId }) => {
-      void refreshTask(queryClient, taskId);
+      // The link is a row on the contact's own feed as well as the task's.
+      void refreshTask(queryClient, taskId, REFRESH_CONTACT_HISTORY);
       toast.success(SUCCESS_MESSAGES.TASK_CONTACT_LINKED);
     },
     onError: reportFailure,
+    onSettled: () => settleTaskWrite(queryClient),
   });
 }
 
@@ -1464,10 +1592,11 @@ export function useUnlinkTaskContact() {
     ...TASK_WRITE,
     mutationFn: unlinkTaskContact,
     onSuccess: (_, { taskId }) => {
-      void refreshTask(queryClient, taskId);
+      void refreshTask(queryClient, taskId, REFRESH_CONTACT_HISTORY);
       toast.success(SUCCESS_MESSAGES.TASK_CONTACT_UNLINKED);
     },
     onError: reportFailure,
+    onSettled: () => settleTaskWrite(queryClient),
   });
 }
 
@@ -1488,6 +1617,7 @@ export function useAttachTaskIntermediateJournal() {
       toast.success(SUCCESS_MESSAGES.TASK_JOURNAL_ATTACHED);
     },
     onError: reportFailure,
+    onSettled: () => settleTaskWrite(queryClient),
   });
 }
 
@@ -1503,5 +1633,6 @@ export function useDetachTaskIntermediateJournal() {
       toast.success(SUCCESS_MESSAGES.TASK_JOURNAL_DETACHED);
     },
     onError: reportFailure,
+    onSettled: () => settleTaskWrite(queryClient),
   });
 }

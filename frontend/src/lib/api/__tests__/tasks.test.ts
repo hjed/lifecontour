@@ -12,6 +12,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import React, { ReactNode } from 'react';
 import { taskListKeys } from '../task-list-keys';
+import { historyKeys } from '../contact-history-keys';
 import {
   CONTACT_NOT_FOUND,
   TASK_DUE_JOURNAL_NOT_FUTURE,
@@ -684,6 +685,41 @@ describe('Task API client', () => {
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task created successfully');
+    });
+
+    it("refreshes the contacts' feeds when it links contacts, and only then", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(taskWriteResponse(), 201));
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const { result } = renderHook(() => useCreateTask(), {
+        wrapper: createWrapper,
+      });
+
+      await result.current.mutateAsync({
+        journalId: '7',
+        text: 'Print the permit',
+        due_journal_id: 42,
+        contact_ids: [3],
+      });
+      await waitFor(() => {
+        expect(invalidatedKeys(invalidateSpy)).toContainEqual(historyKeys.all);
+      });
+
+      invalidateSpy.mockClear();
+      await result.current.mutateAsync({
+        journalId: '7',
+        text: 'Print the permit',
+        due_journal_id: 42,
+        contact_ids: [],
+      });
+      await waitFor(() => {
+        expect(invalidatedKeys(invalidateSpy)).toContainEqual(
+          taskKeys.journalLists()
+        );
+      });
+      expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
+        historyKeys.all
+      );
     });
 
     it('toasts the service refusal when the due journal is not future-dated', async () => {
@@ -1919,6 +1955,142 @@ describe('Task API client', () => {
     });
   });
 
+  /**
+   * A list's tasks sit under `taskKeys`, so the optimistic patch reaches them —
+   * including the *Completed* group, an infinite query whose cached shape is
+   * `{ pages: [{ data }] }` rather than `{ data }`.
+   */
+  describe('useUpdateTask on a list', () => {
+    const openKey = taskKeys.openOnList('3');
+    const completedKey = taskKeys.completedOnList('3', 20);
+
+    function seedLists(): void {
+      queryClient.setQueryData(openKey, {
+        data: [taskReadResponse().data],
+        meta: { total: 1 },
+      });
+      queryClient.setQueryData(completedKey, {
+        pages: [
+          {
+            data: [taskReadResponse({ status: TaskStatus.DONE }).data].map(
+              task => ({ ...task, id: '2' })
+            ),
+            meta: {
+              total_count: 1,
+              page_count: 1,
+              current_page: 1,
+              per_page: 20,
+            },
+          },
+        ],
+        pageParams: [1],
+      });
+    }
+
+    function completedStatus(): TaskStatus | undefined {
+      return queryClient.getQueryData<{
+        pages: { data: TaskReadResponse['data'][] }[];
+      }>(completedKey)?.pages[0].data[0].attributes.status;
+    }
+
+    function openStatus(): TaskStatus | undefined {
+      return queryClient.getQueryData<{ data: TaskReadResponse['data'][] }>(
+        openKey
+      )?.data[0].attributes.status;
+    }
+
+    it('patches a task inside a cached page of the Completed group', async () => {
+      seedLists();
+      const release = heldRequest(() => jsonResponse(taskWriteResponse()));
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      const settled = result.current.mutateAsync({
+        taskId: '2',
+        status: TaskStatus.NOT_DONE,
+      });
+
+      await waitFor(() => {
+        expect(completedStatus()).toBe(TaskStatus.NOT_DONE);
+      });
+
+      release();
+      await settled;
+    });
+
+    it('patches an open list task, and puts both back when the write fails', async () => {
+      seedLists();
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await expect(
+        result.current.mutateAsync({ taskId: '1', status: TaskStatus.DONE })
+      ).rejects.toThrow();
+      await expect(
+        result.current.mutateAsync({ taskId: '2', status: TaskStatus.NOT_DONE })
+      ).rejects.toThrow();
+
+      expect(openStatus()).toBe(TaskStatus.NOT_DONE);
+      expect(completedStatus()).toBe(TaskStatus.DONE);
+    });
+  });
+
+  /**
+   * A task write that settles while another is still out skips the shared
+   * refresh, on the promise that the last one standing will run it. Every
+   * task write keeps that promise on settle, failure included — not only the
+   * ones that refresh on settle themselves.
+   */
+  describe('a skipped shared refresh', () => {
+    it('runs when the write it waited on fails', async () => {
+      const failRetarget = heldRequest(() =>
+        errorResponse(503, 'UNAVAILABLE', 'Offline')
+      );
+      mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const retarget = renderHook(() => useRetargetTask(), {
+        wrapper: createWrapper,
+      });
+      const update = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      act(() => {
+        retarget.result.current.mutate({ taskId: '2', due_journal_id: 42 });
+      });
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      await update.result.current.mutateAsync({
+        taskId: '1',
+        status: TaskStatus.DONE,
+      });
+      expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
+        taskKeys.journalLists()
+      );
+
+      act(() => failRetarget());
+      await waitFor(() => {
+        expect(invalidatedKeys(invalidateSpy)).toEqual(
+          expect.arrayContaining([
+            taskKeys.journalLists(),
+            taskKeys.upcoming(),
+            taskKeys.onLists(),
+            homeDashboardKeys.all,
+            journalKeys.lists(),
+            taskListKeys.listings(),
+          ])
+        );
+      });
+    });
+  });
+
   describe('useUpdateTask settling behind another task write', () => {
     it("still refreshes its own task's detail and history", async () => {
       // The other write refreshes the shared surfaces when it settles, but
@@ -2194,6 +2366,8 @@ describe('Task API client', () => {
           taskKeys.onLists(),
           taskHistoryKeys.forTask('1'),
           homeDashboardKeys.all,
+          // The link is a row on the contact's own feed too.
+          historyKeys.all,
         ]);
       });
       // Named rather than left to the exhaustive match above: `tasks_due_count`
@@ -2224,6 +2398,8 @@ describe('Task API client', () => {
           taskKeys.onLists(),
           taskHistoryKeys.forTask('1'),
           homeDashboardKeys.all,
+          // The link is a row on the contact's own feed too.
+          historyKeys.all,
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith(

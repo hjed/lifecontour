@@ -2994,15 +2994,138 @@ architecture docs. Frontend only: the backend already sent `task_list_id`, `due_
 - [ ] At a 390px-wide viewport every page here has no horizontal scroll and touch targets of at least 44px.
 - [ ] E2E covers create list → add → complete → find under Completed, reorder, archive and unarchive, on Firefox and Mobile Chrome.
 
-#### Phase 1: Frontend API client for lists and list tasks
+#### Phase 1: Frontend API client for lists and list tasks ✅ DONE
 
-**Status:** 🚧 IN PROGRESS — delivered as a stack of two PRs: (1) types and list hooks, (2) list-task hooks.
+**Status:** ✅ DONE — delivered as a stack of two PRs: (1) types and list hooks, (2) list-task hooks.
 **Prerequisites:** ITER21-001.
-**Estimated diff:** ~200 production → **~900 tracked**
+**Estimated diff:** ~200 production → **~900 tracked** · **Actual:** ~1,720 production →
+**~3,880 tracked** across both layers, excluding this document. Layer 1 (types, list hooks,
+`tasks.ts` changes, E2E fixture types): 2,412 (≈1,180 production, ≈1,170 tests, 63 docs). Layer 2
+(list-task hooks, the paged patch): 1,471 (≈540 production, ≈895 tests, 39 docs). That is ×8.6 on
+the production estimate and ×4.3 on tracked lines. Two things drove it. The hook surface grew to
+every route ITER21-001 exposes: 15 hooks, where the estimate assumed "types and hooks" for the
+first UI phases only. And the cache rules between the two key roots, including the overlapping-move
+settling the independent review asked for, needed docstrings and tests of their own. Tests sat at
+about ×1.2 production. Re-estimate the frontend phases that follow from their components, as the
+calibration says, not from this phase.
 
 **Acceptance Criteria:**
 
-- [ ] Types and query/mutation hooks.
+- [x] Types and query/mutation hooks.
+
+**What landed:**
+- **Types.**
+  - `types/task-icons.ts`: `TASK_ICONS`, the 40 keys in published order, and `TaskIcon`.
+  - `types/task-lists.ts`: list resources (`TaskListSummaryResource` carries `open_task_count`, only on the listing), responses, `TaskListRef`, and inputs.
+  - `types/tasks.ts`:
+    - `flagged` and `icon` on the write shape, and `task_list` on the read shape;
+    - `ListTasksResponse`, `CompletedListTasksResponse`, `TaskCollectionResponse`;
+    - a widened `TaskUpdateInput`;
+    - `ListTaskCreateInput`, `ListTaskReorderInput`, `TaskMoveInput`.
+  - Request inputs are unions, so a body naming no change, both dates (on a create or a `PATCH`), a `null` flag or an unknown icon does not compile; `@ts-expect-error` cases in `types/__tests__/task-list-types.test.ts` pin this.
+- **List hooks** (`lib/api/task-lists.ts`): `useTaskLists({archived})`, `useTaskList`, `useTaskListHistory`, `useCreateTaskList`, `useUpdateTaskList`, `useMoveTaskList` (optimistic), `useArchiveTaskList`, `useUnarchiveTaskList`, `useDeleteTaskList`, and the codes `TASK_LIST_NOT_FOUND`, `TASK_LIST_ARCHIVED` and `TASK_LIST_CHANGED`.
+- **List-task hooks** (`lib/api/list-tasks.ts`): `useTaskListOpenTasks`, `useTaskListCompletedTasks` (infinite), `useCreateListTask`, `useReorderListTask` (optimistic), `useMoveTaskToList`, `useRemoveTaskFromList`, and the codes `TASK_DUE_DATE_IN_PAST` and `TASK_LIST_REMOVAL_NEEDS_JOURNALS`.
+- **Overlapping moves.** `lib/api/move-sequence.ts` tracks overlapping optimistic moves per scope.
+- **Keys.** `lib/api/task-list-keys.ts` holds `taskListKeys` (`['task-lists']`) and `taskListHistoryKeys` (`['task-list-history']`). `taskKeys.onLists()`, `onList`, `openOnList` and `completedOnList` are a fourth sibling under `['tasks']`.
+- **`lib/api/tasks.ts`.**
+  - `useUpdateTask` sends `flagged`, `icon`, `due_date`, `due_journal_id` and `acknowledge_reopen`, and patches the flag and icon optimistically.
+  - It raises no toast for `TASK_REOPEN_NOT_ACKNOWLEDGED`.
+  - The patch and rollback walk an infinite query's `pages`.
+  - `taskFilters` names `onLists()`, and the count-moving refreshes name `taskListKeys.listings()`.
+- **Order helpers.** `lib/api/cached-order.ts` holds pure order helpers that move rows without rebuilding them.
+- **E2E fixtures.** `tests/e2e/data-management.ts` reads its list and list-task answers through the shared types.
+
+**Tests:**
+- **Unit, the order helpers** (`cached-order.test.ts`): move to an index, clamped, after an anchor, and to the top; re-order by ids keeping each row object; a set mismatch.
+- **Unit, every hook** (`task-lists.test.ts`, `list-tasks.test.ts`):
+  - URLs, `credentials` and query parameters; exact JSON:API bodies, with `null` meaning clear and absent meaning keep, and ids sent as JSON integers;
+  - paging by `meta`, never `links.next`;
+  - what each write stores, removes and invalidates;
+  - `TaskApiError` codes, toasts, and no retry.
+- **Unit, the optimistic reorders:**
+  - the move shows at once;
+  - the answer re-sorts and keeps the counts or the read models;
+  - an order-only rollback keeps a status ticked meanwhile;
+  - the newest of two quick moves wins;
+  - two failing moves, or an older failure after a newer success, re-read rather than restore;
+  - a pending reorder on one list never holds back another list's;
+  - a move that cut short a refresh in flight re-reads;
+  - an answer naming other rows re-reads;
+  - `TASK_LIST_CHANGED` re-reads without a toast;
+  - a pending reorder does not hold back a status write's refresh.
+- **Unit, `tasks.test.ts`:**
+  - the new `PATCH` attributes;
+  - optimistic flag and icon, with rollback; a date-only update patches nothing;
+  - the reopen question raises no toast;
+  - the patch and rollback inside a cached Completed page and an open-list payload;
+  - the count-moving refreshes name the listings.
+- **Integration, cross-root cache behaviour** (`task-cache-freshness.test.ts`, one real `QueryClient`):
+  - the sibling contract both ways, with neither list root under `taskKeys.all`;
+  - a status tick neither patches nor cancels a cached listing, yet re-reads it for the count;
+  - a task write refreshes a list's tasks;
+  - a list rename refreshes a task detail embedding it, and the list's history;
+  - a journal write reaches a list's tasks;
+  - a move refreshes the list it left and the list it joined.
+- **E2E:** none added; there is no UI, and Phase 4 creates `task-lists.spec.ts`. `task-activity-history.spec.ts` and `journal-tasks.spec.ts`, whose list helpers changed, were re-run on Firefox and Mobile Chrome: 47 passed.
+- **No backend test.** Neither the backend nor `core_shared` changed. The contract is pinned by `test_task_list_endpoints.py` (OpenAPI `TaskIcon` included), `test_task_list_tasks_endpoints.py` and `test_task_endpoints.py`.
+- **Gates run locally, on each layer:**
+  - `pnpm quality:check` (0 errors);
+  - the full Jest suite (260 suites, 3,540 tests on layer 2);
+  - pre-commit.
+  - Backend ruff, mypy and pytest are not applicable, because no Python file changed.
+
+**Decisions:**
+- **User decisions in plan review:**
+  - *Hook surface:* every hook ITER21-001 exposes lands here, rather than each landing with the UI phase that first uses it.
+  - *Stacking:* the phase is delivered as a stack of two PRs.
+  - *Icon keys:* copied from the backend enum, as every other mirrored enum is (`TaskStatus`, `LapseReason`, `JournalType`, …). This replaces the Phase 3 note's "take the keys from the OpenAPI `TaskIcon` schema", because there is no codegen, and there are no cross-stack contract tests. The set is add-only, and Phase 2's `Record<TaskIcon, …>` will force an icon for every key.
+- **A key root is a resource type, so lists get their own** (a rationale the user asked for in plan review).
+  - `taskKeys.all` is what every task write cancels and patches as task resources, and what every journal, contact and timezone write invalidates.
+  - A list is a different aggregate. Under `taskKeys.all`, a status tick would cancel the sidebar listing, a journal rename would refetch every list, and the patcher would run over list payloads.
+  - A list's **tasks** are task resources, so they sit under `taskKeys`.
+  - The cross-root dependencies are named by the mutations: task counts → `taskListKeys.listings()`; list name, icon and archive → `taskKeys.all`, the dashboard, the contact history and the list's history.
+- **The listing is refreshed by the writes that can move a count** (status, create, delete, retarget, move, remove), named beside the journals' due counts. A contact or mention link does not refresh it. A text, flag or icon edit does, one refetch more than needed, because `useUpdateTask` cannot tell from its variables what changed (the trade `refreshTaskAndDueCounts` already documents).
+- **Overlapping optimistic moves settle together** (independent review). The rule applies to list moves and to task reorders on one list:
+  - nothing is decided until the last pending move settles;
+  - that move's answer is taken only if it is also the newest;
+  - anything else re-reads, because each move's snapshot may hold another's unconfirmed order;
+  - a lone failure first restores its order.
+  - The pending count lives in `lib/api/move-sequence.ts`, per scope, rather than in `isMutating`: two answers landing in the same tick each see the other as still pending. It also re-reads when a move's cancel cut short a refresh already in flight.
+- **Moving a task onto a list, and taking it off one, refresh on settle** (independent review), so a failure refreshes too. The shared collections are refreshed by the last task write standing, as `useUpdateTask` does. That also covers a status change that skipped its refresh behind one of them. The task's own detail and history, and the contact history, are refreshed in every case, because the last writer refreshes those only for its own task.
+- **Automated review (Greptile) on the two PRs:**
+  - **A list write's answer is stored only after cancelling a detail read already in flight,** which would otherwise land afterwards and restore the old name or archived state.
+  - **A move's answer brings the order and positions, and nothing else,** so a rename landing while it was out survives.
+  - **Automated review (auggie) on #2067:**
+    - **Overlapping writes to one list** (a rename answering after an archive it committed before) are sequenced like moves: only the newest answer is stored, and the list is re-read.
+    - **A delete takes part in the same write sequence** (Greptile): a list's delete makes a rename still out on it no longer the newest, and a task's delete does the same for `useRemoveTaskFromList` (`taskStoreScope`). A late answer can then recreate neither deleted detail.
+    - **A task update settling behind another task write** still refreshes its own detail and history, because the last writer refreshes only its own task.
+  - **Overlapping moves or reorders are confirmed by a re-read even when the newest answer arrives last:** the order the answers arrived in says nothing about the order the server applied them in.
+  - **A read started during a move or reorder, still running as it settles, is cancelled before the answer is applied and then re-read,** so a read that captured the old order cannot land afterwards and snap it back.
+  - **A skipped shared refresh is owed and repaid by the last task write to settle, success or failure** (`deferSharedRefresh`, `settleTaskWrite`). Most task writes, journal ones included, refreshed only on success, so a write that skipped behind one of them was never covered when that one failed.
+  - **Every task write that adds a row to a contact's feed now refreshes it.** That is creating a task with contacts (on a journal or on a list), and linking or unlinking a contact; before, none did. `historyKeys` moved to `lib/api/contact-history-keys.ts` to avoid the `contacts.ts` ↔ `tasks.ts` import cycle.
+- *Found, not fixed:* `isLastTaskWrite` reads `isMutating`. Two task writes answered in the same tick can each see the other as pending and both skip the shared refresh. This predates the phase (`useUpdateTask`, `useRetargetTask`). The list moves avoid it with their own count in `move-sequence.ts`.
+- **Archive and unarchive answers are stored as the list's detail, never in a listing,** which is the only shape with a count.
+- **Delete removes, rather than invalidates, the list's detail and its tasks' queries** (a refetch would only answer 404). It invalidates the list's history, which ends in the deletion.
+- **The reorder is not a task write.** `TASK_REORDER_KEY` is not `TASK_WRITE_KEY`: a reorder records nothing and moves no count, and counting it would hold back `isLastTaskWrite` refreshes and the dashboard's on-load summary hold for the length of a drag.
+- **Completed tasks are paged by number from `meta`.** The backend's `links` are absolute and built from its own base URL, and `next` is `null` (not absent) on the last page; the Phase 21 note was loose.
+- **`useCreateListTask` takes the list in its variables** (`listId`), as `useCreateTask` takes its journal, rather than as a hook argument, so one hook can create on any list (the New dialog's *On a list*).
+- **Dates are not patched optimistically;** `overdue` needs the user's day boundary.
+
+**Notes for later phases:**
+- *Phase 2:* iterate `TASK_ICONS` (published order) and map it through `Record<TaskIcon, LucideIcon>`.
+- *Phases 4 and 5:* use `useTaskListOpenTasks(listId)` and `useCreateListTask()` with `{listId, text}`. A status tick is already optimistic on the list page.
+- *Phase 9:* `useMoveTaskList()` with `{listId, index}` (the index among active lists) is optimistic and needs no refetch. The `all` listing is re-read and the archived one left alone.
+- *Phase 10:*
+  - `useReorderListTask()` takes `{taskId, listId, afterTaskId}`. Keyboard down sends the next task; up sends the task two above, or `null`.
+  - On `TASK_LIST_CHANGED` the hook has already re-read the list and raised no toast. Retrying against the fresh order is the caller's.
+- *Phase 11:*
+  - `useTaskListCompletedTasks(listId)` is infinite (`fetchNextPage`, `hasNextPage`).
+  - Reopening is `useUpdateTask` with `status: not_done`, patched optimistically inside the pages.
+  - A status tick cancels an in-flight `fetchNextPage`, which is not re-requested, so re-offer *Show more* rather than assuming it loaded.
+- *Phase 12:* extend `TaskListListingParams` (paging, the name filter). `taskListKeys.listing` already takes an object.
+- *Phases 13 and 14:* use the archive, unarchive and delete hooks. The delete's 409 codes are on `error.code`; the hook still toasts the detail, which Phase 14 may suppress for the codes it answers.
+- *Phase 16:* `useMoveTaskToList()` with `{taskId, taskListId}`, and `useRemoveTaskFromList()` with the task id, whose answer's `lapsed` follows the removal. `TASK_LIST_REMOVAL_NEEDS_JOURNALS` is exported.
+- *Phase 17:* `useTaskListHistory(listId, {page, limit})`; the wording is still to add.
 
 #### Phase 2: Icon picker
 
