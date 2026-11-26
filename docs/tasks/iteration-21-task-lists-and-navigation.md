@@ -3127,15 +3127,84 @@ calibration says, not from this phase.
 - *Phase 16:* `useMoveTaskToList()` with `{taskId, taskListId}`, and `useRemoveTaskFromList()` with the task id, whose answer's `lapsed` follows the removal. `TASK_LIST_REMOVAL_NEEDS_JOURNALS` is exported.
 - *Phase 17:* `useTaskListHistory(listId, {page, limit})`; the wording is still to add.
 
-#### Phase 2: Icon picker
+#### Phase 2: Icon picker ✅ DONE
 
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ DONE
 **Prerequisites:** Phase 1.
-**Estimated diff:** ~120 production → **~600 tracked**
+**Estimated diff:** ~120 production → **~600 tracked** · **Actual:** ~326 production → **~880
+tracked**, excluding this document. That is 326 production (display map 116, picker 139, glyph 16,
+harness page and client 52, Playwright env 3), 495 tests (the E2E spec 138, the picker 222, the
+rest 135) and 58 architecture docs. This is ×2.7 on the production estimate and ×1.5 on tracked
+lines. Two things drove it: the 40-entry display map, which the estimate did not count, and the
+test-only harness route and its spec, which the user chose in plan review. Re-estimate the phases
+that embed the picker (6, 15, 18) from their components; this phase's E2E already covers the
+picker's own behaviour, so they need only test it in context.
 
 **Acceptance Criteria:**
 
-- [ ] Fixed set mapped to `lucide-react`; search by name; scrolling grid; "No icon"; keyboard operable.
+- [x] Fixed set mapped to `lucide-react`; search by name; scrolling grid; "No icon"; keyboard operable.
+
+**What landed:**
+- `lib/task-icon-display.ts`:
+  - `TASK_ICON_DISPLAY`, a `Record<TaskIcon, { Icon, label }>` holding the lucide component and the searchable name for each of the 40 keys;
+  - `filterTaskIcons`, a trimmed, case-insensitive substring match on the name, in published order.
+- `components/tasks/TaskIconGlyph.tsx`: draws one icon, `aria-hidden`.
+- `components/tasks/TaskIconPicker.tsx`, a controlled `value: TaskIcon | null` / `onChange` picker:
+  - a search field and one `role="status"` line;
+  - a scrolling radio grid of 44px tiles, with **No icon** first and never filtered out;
+  - a "Chosen: …" caption, and a `title` on each tile.
+- `/e2e-harness/task-icon-picker`: the picker on its own, beside an `<output>` of its value. The route is served only when `E2E_TEST_ROUTES=true`, which `playwright.config.ts` sets.
+- Docs:
+  - `frontend-design.md` *The task icon picker*;
+  - `testing-strategy.md` *E2E Harness Routes*.
+
+**Tests:**
+- **Unit:**
+  - `lib/__tests__/task-icon-display.test.ts`: every key has a component and a unique name; the search's blank, case, trim, mid-word, several-match and no-match cases.
+  - `TaskIconGlyph.test.tsx`.
+  - The harness page's gate (`app/e2e-harness/task-icon-picker/__tests__/page.test.tsx`): 404 unset or `'false'`; renders when `'true'`.
+- **Component** (`TaskIconPicker.test.tsx`, real Radix):
+  - the 41 radios in order;
+  - the checked state and caption;
+  - `onChange` with the key or `null`;
+  - the search narrowing and the status line;
+  - `aria-controls`;
+  - Tab to the chosen tile; the arrows; looping from first to last;
+  - the chosen tile hidden by a search (Tab still reaches the grid, and Space chooses);
+  - disabled.
+- **E2E** (`task-icon-picker.spec.ts`, Firefox and Mobile Chrome):
+  - search and choose; "No icon" clears;
+  - keyboard only (Tab, arrows, End, Space);
+  - the grid really scrolls;
+  - at 390px, no horizontal scroll and 44px for the search field and all 41 tiles.
+- **No backend test:** nothing in Python or `core_shared` changed.
+
+**Decisions:**
+- **User decision in plan review: a test-only route.** The picker gets browser coverage in this phase through a harness route (`/e2e-harness/task-icon-picker`), rather than waiting for Phase 6 to embed it.
+  - It is gated at request time by `E2E_TEST_ROUTES`, a server env variable, so it works under CI's production build. Deployments answer 404.
+- **A radio group, not a cmdk listbox.** The canvas draws radio tiles. `Command` moves linearly through a grid, matches fuzzily ("car" finds "calendar"), and has no checked state.
+- **No fieldset, though the canvas draws one.** The group is named by `aria-labelledby` on a `<span>`, per the *Attaching a mention* rule (a fieldset would add a second group with the same name).
+- **Tiles are `RadioGroupPrimitive.Item`.** `ui/RadioGroupItem` is a fixed 16px dot. This is the first feature-level `radix-ui` import.
+- **Names are written by hand.** For example `users` → "People" and `book-open` → "Open book", so the search finds the word a person would use.
+- **The chosen tile is marked by a ring, a check glyph and the caption, not colour alone.**
+- **Radix checks a radio when an arrow key's focus lands on it, but only while the key is still down,** and it moves focus on a timeout. A person's keypress outlasts that timeout.
+  - The tests hold the key the same way: a 50ms press in Playwright, and a key held across one tick in Jest.
+  - Without that, Mobile Chrome's instant press left focus moved but nothing chosen.
+  - Home and End move focus only, so Space chooses.
+- **Touch targets in Playwright are compared to 0.1px.** Firefox measured a 44px tile on a fractional grid track as 43.999998px.
+- **A spec of its own (`task-icon-picker.spec.ts`), not the sub-iteration's spec.** Rule 7's single spec, `task-lists.spec.ts`, is still Phase 4's to create. This spec tests the harness, which is retired once a product page covers the picker (independent review).
+- **Focus is an outline, separate from the chosen tile's ring** (independent review). The checked ring came after `focus-visible:ring-*` in the compiled CSS, so a focused, chosen tile looked unfocused (WCAG 2.4.7). In Tailwind 4 an `outline-none` base also needs `focus-visible:outline-solid`. The E2E asserts the focused, chosen tile's outline.
+- **The harness reports hydration** (`data-hydrated`), and the spec waits on it, so no click lands on server-rendered markup (independent review).
+- **Layout departs from the canvas:** 44px tiles rather than 40px, a "Chosen: …" caption in place of the help line, and no magnifier glyph.
+
+**Notes for later phases:**
+- *Phases 3 and 18:*
+  - `TaskIconGlyph({ icon, className })` and `TASK_ICON_DISPLAY[icon].label` are here; Phase 3 depends on this phase for them, beyond the Phase 1 prerequisite its heading lists.
+  - The glyph is always `aria-hidden`, but on a row the icon says something the text does not, so give it the label as visually hidden text.
+- *Phases 6, 15 and 18:*
+  - every arrow key calls `onChange`, so commit the icon on the form's submit, never on change (no auto-save per keypress);
+  - the picker takes `value`, `onChange` and `disabled` only; add form wiring (`aria-describedby`, `aria-invalid`) on its `RadioGroup` when the first form needs it.
+- *Phase 6:* test the picker in the list dialog as part of that flow. Its search, keyboard, scroll and 390px behaviour are already covered by `task-icon-picker.spec.ts`, so Phase 6's estimate is unchanged. Once a product page covers what the harness does, retire the harness (`testing-strategy.md`).
 
 #### Phase 3: Task row
 

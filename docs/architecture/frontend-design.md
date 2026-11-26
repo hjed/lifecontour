@@ -870,6 +870,42 @@ component unchanged.
   other business in, so it is named here as a follow-up rather than done under
   cover of an unrelated change.
 
+#### The task icon picker
+
+Tasks and lists carry an optional icon from a fixed set (`TASK_ICONS`,
+`types/task-icons.ts`, copied from the backend `TaskIcon` enum and add-only).
+
+- **Display.** `TASK_ICON_DISPLAY` (`lib/task-icon-display.ts`) maps each key to
+  the `lucide-react` component that draws it and the name people see and search.
+  It is a `Record<TaskIcon, …>`, so a key added to the set does not compile until
+  it has both. The stored key never follows a lucide rename; only the component
+  does. `TaskIconGlyph` draws an icon `aria-hidden`, for rows whose text carries
+  the name.
+- **`TaskIconPicker`** (`components/tasks/`) is a controlled
+  `value: TaskIcon | null` / `onChange` control, following the canvas's *Task
+  details* artboard: a search field, one `role="status"` line saying what the
+  grid holds ("40 icons", "1 icon", *No icons match "…"*), and a scrolling grid
+  with **No icon** first. It departs from the artboard in three places: tiles
+  are 44px rather than 40px (the phone touch-target rule), a "Chosen: …" caption
+  replaces the help line so a sighted user sees the name they would search for,
+  and the search field has no magnifier glyph.
+- **It is a radio group**, named through `aria-labelledby` on a `<span>` rather
+  than a fieldset, for the reason under *Attaching a mention*. Radix supplies
+  the roving tab stop: Tab lands on the chosen tile (or the first visible one
+  when a search hides it) and the arrows move the choice one tile at a time in
+  reading order (ArrowDown is the next tile, not the one below, as in any radio
+  group); Home and End move focus without choosing. Each arrow calls
+  `onChange`, so a form commits the icon on submit, never on change. Focus is
+  an outline, because the chosen tile already wears a ring: in Tailwind 4 an
+  `outline-none` base also needs `focus-visible:outline-solid`. The tiles
+  are `RadioGroupPrimitive.Item`s, because `ui/RadioGroupItem` is a fixed 16px
+  dot; promote a tile item to `ui/` if a second picker needs one.
+- **Search** is a trimmed, case-insensitive substring of the name
+  (`filterTaskIcons`), in published order, and never hides **No icon**.
+- **Browser coverage** runs against `/e2e-harness/task-icon-picker` (see
+  *E2E harness routes* in [`testing-strategy.md`](./testing-strategy.md)), until
+  the list form and the task details panel embed the picker.
+
 #### Creating a task
 
 `CreateTaskForm` (`components/tasks/CreateTaskForm.tsx`) is the

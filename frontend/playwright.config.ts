@@ -180,6 +180,9 @@ export default defineConfig({
       // instead). Build without it for the `next start`-served e2e server so
       // the suite runs a supported configuration.
       NEXT_OUTPUT_STANDALONE: 'false',
+      // Serves the `/e2e-harness/*` pages, which render a component on its
+      // own before any product page embeds it; every other server 404s them.
+      E2E_TEST_ROUTES: 'true',
     },
   },
 });
