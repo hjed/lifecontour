@@ -47,6 +47,7 @@ import {
   TaskUpdateInput,
 } from '@/types/tasks';
 import type { JsonApiErrorResponse, JsonApiMeta } from '@/types/api';
+import type { TaskIcon } from '@/types/task-icons';
 import type { HistoryFilters, HistoryListResponse } from '@/types/history';
 import {
   API_ENDPOINTS,
@@ -59,6 +60,7 @@ import { invalidateAfterMutation } from './invalidate-after-mutation';
 // the journal client, so reaching back into it would close a runtime cycle that
 // breaks partial-mock tests — see the header of `journal-keys.ts`.
 import { journalKeys } from './journal-keys';
+import { taskListKeys } from './task-list-keys';
 // Safe to import whole, unlike the journal client above: `home-dashboard.ts`
 // is a leaf — it imports the shared types and constants and nothing from this
 // layer — so there is no cycle to close.
@@ -190,6 +192,18 @@ export const taskKeys = {
   /** Reserved for the dashboard's task section (ITER18-001 Phase 14). */
   upcoming: () => [...taskKeys.all, 'upcoming'] as const,
   upcomingWindow: (days: number) => [...taskKeys.upcoming(), days] as const,
+  /**
+   * The tasks on lists — a fourth sibling. A list's tasks are task resources,
+   * so they sit here (a status tick patches them like any other task surface)
+   * while the lists themselves have a root of their own (`taskListKeys`).
+   */
+  onLists: () => [...taskKeys.all, 'list'] as const,
+  onList: (listId: string) => [...taskKeys.onLists(), listId] as const,
+  /** A list's open tasks, in the user's order. */
+  openOnList: (listId: string) => [...taskKeys.onList(listId), 'open'] as const,
+  /** A list's done and cancelled tasks, paged; the page size is part of the key. */
+  completedOnList: (listId: string, limit: number) =>
+    [...taskKeys.onList(listId), 'completed', { limit }] as const,
 };
 
 /**
@@ -289,7 +303,7 @@ async function toTaskApiError(
 }
 
 /** Reads a JSON response, or throws what the failure said. */
-async function readJson<T>(
+export async function readJson<T>(
   response: Response,
   fallbackMessage: string
 ): Promise<T> {
@@ -305,7 +319,7 @@ async function readJson<T>(
  * The body is never read: there is nothing in it, and calling `json()` on an
  * empty body throws.
  */
-async function expectNoContent(
+export async function expectNoContent(
   response: Response,
   fallbackMessage: string
 ): Promise<void> {
@@ -314,7 +328,7 @@ async function expectNoContent(
   }
 }
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
+export const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 // API Functions
 
@@ -388,6 +402,11 @@ async function updateTask({
   taskId,
   text,
   status,
+  flagged,
+  icon,
+  due_date,
+  due_journal_id,
+  acknowledge_reopen,
 }: TaskUpdateInput): Promise<TaskResponse> {
   const response = await fetch(API_ENDPOINTS.TASKS.BY_ID(taskId), {
     method: 'PATCH',
@@ -400,10 +419,16 @@ async function updateTask({
         // the backend refuses a body whose id disagrees with the path.
         id: taskId,
         // Only what changed: the backend reads an absent attribute as "leave it
-        // alone", so sending an explicit null would be a fourth state.
+        // alone". For the icon and the dates `null` is a change of its own —
+        // "clear it" — so each is gated on `undefined`, never on falsiness.
         attributes: {
           ...(text !== undefined ? { text } : {}),
           ...(status !== undefined ? { status } : {}),
+          ...(flagged !== undefined ? { flagged } : {}),
+          ...(icon !== undefined ? { icon } : {}),
+          ...(due_date !== undefined ? { due_date } : {}),
+          ...(due_journal_id !== undefined ? { due_journal_id } : {}),
+          ...(acknowledge_reopen ? { acknowledge_reopen } : {}),
         },
       },
     }),
@@ -534,6 +559,10 @@ function taskFilters(taskId: string) {
     { queryKey: taskKeys.detail(taskId) },
     { queryKey: taskKeys.journalLists() },
     { queryKey: taskKeys.upcoming() },
+    // A list's tasks embed everything a task read does. Named for every task,
+    // journal-only ones included: a cache cannot tell which list, if any, a
+    // task id is on, and an unmounted list page refetches nothing.
+    { queryKey: taskKeys.onLists() },
     { queryKey: taskHistoryKeys.forTask(taskId) },
     REFRESH_HOME_DASHBOARD,
   ];
@@ -565,6 +594,16 @@ function taskFilters(taskId: string) {
  * has already drawn, and the next load brings the refreshed one.
  */
 const REFRESH_HOME_DASHBOARD = { queryKey: homeDashboardKeys.all };
+
+/**
+ * The lists' listings, whose `open_task_count` a task write can move.
+ *
+ * The lists live under a root of their own (`task-list-keys.ts`), so a task
+ * write reaches them only by naming them. Named exactly where a count can move
+ * — a status change, a create, a delete, a retarget that reopens — alongside
+ * the journals' due counts, and not on a contact or mention link, which cannot.
+ */
+const REFRESH_LIST_COUNTS = { queryKey: taskListKeys.listings() };
 
 function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
   return invalidateAfterMutation(queryClient, ...taskFilters(taskId));
@@ -599,13 +638,16 @@ function refreshTask(queryClient: QueryClient, taskId: string): Promise<void> {
  * shipped that way — the task-history key auto-merged into `refreshTask` alone,
  * which is the half a *status change* does not call.
  */
-function refreshTaskAndDueCounts(
+export function refreshTaskAndDueCounts(
   queryClient: QueryClient,
   taskId: string
 ): Promise<void> {
-  return invalidateAfterMutation(queryClient, ...taskFilters(taskId), {
-    queryKey: journalKeys.lists(),
-  });
+  return invalidateAfterMutation(
+    queryClient,
+    ...taskFilters(taskId),
+    { queryKey: journalKeys.lists() },
+    REFRESH_LIST_COUNTS
+  );
 }
 
 /**
@@ -618,13 +660,17 @@ function refreshTaskAndDueCounts(
  * Always moves a journal's due count by one, so `journalKeys.lists()` is
  * unconditional here where {@link refreshTaskAndDueCounts} is the opt-in form.
  */
-function refreshTaskCollections(queryClient: QueryClient): Promise<void> {
+export function refreshTaskCollections(
+  queryClient: QueryClient
+): Promise<void> {
   return invalidateAfterMutation(
     queryClient,
     { queryKey: taskKeys.journalLists() },
     { queryKey: taskKeys.upcoming() },
+    { queryKey: taskKeys.onLists() },
     REFRESH_HOME_DASHBOARD,
-    { queryKey: journalKeys.lists() }
+    { queryKey: journalKeys.lists() },
+    REFRESH_LIST_COUNTS
   );
 }
 
@@ -642,7 +688,9 @@ function refreshTaskJournalLinks(
   return invalidateAfterMutation(
     queryClient,
     { queryKey: taskKeys.detail(taskId) },
-    { queryKey: taskKeys.journalLists() }
+    { queryKey: taskKeys.journalLists() },
+    // A list's tasks are read whole, intermediate journals included.
+    { queryKey: taskKeys.onLists() }
   );
 }
 
@@ -659,7 +707,7 @@ function forgetTask(queryClient: QueryClient, taskId: string): void {
   queryClient.removeQueries({ queryKey: taskKeys.detail(taskId) });
 }
 
-function reportFailure(error: Error): void {
+export function reportFailure(error: Error): void {
   toast.error(error.message);
 }
 
@@ -676,6 +724,8 @@ function reportFailure(error: Error): void {
 interface OptimisticTaskPatch {
   status?: TaskStatus;
   text?: string;
+  flagged?: boolean;
+  icon?: TaskIcon | null;
   lapsed?: boolean;
   lapse_reason?: LapseReason | null;
   overdue?: boolean;
@@ -703,13 +753,22 @@ interface CachedTaskPayload {
 function optimisticPatch({
   status,
   text,
+  flagged,
+  icon,
 }: {
   status?: TaskStatus;
   text?: string;
+  flagged?: boolean;
+  icon?: TaskIcon | null;
 }): OptimisticTaskPatch {
   const patch: OptimisticTaskPatch = {};
 
+  // The flag and the icon are plain values with nothing derived from them, so
+  // they show at once. A date is not patched: whether the task is then overdue
+  // needs the day boundary in the user's timezone, which only the refetch has.
   if (text !== undefined) patch.text = text;
+  if (flagged !== undefined) patch.flagged = flagged;
+  if (icon !== undefined) patch.icon = icon;
   if (status !== undefined) {
     patch.status = status;
     // Lapse is derived from "still not done and the due journal is no longer
@@ -783,6 +842,8 @@ function findCachedTask(
 const PATCHABLE_FIELDS = [
   'status',
   'text',
+  'flagged',
+  'icon',
   'lapsed',
   'lapse_reason',
   'overdue',
@@ -1052,7 +1113,7 @@ function isLastTaskWrite(queryClient: QueryClient): boolean {
  * Reads keep the default retry: a `GET` is idempotent and a transient failure
  * there is worth riding out.
  */
-const NO_RETRY = { retry: false } as const;
+export const NO_RETRY = { retry: false } as const;
 
 /**
  * The mutation key every task write carries, and the only thing that makes a
@@ -1067,7 +1128,7 @@ const NO_RETRY = { retry: false } as const;
 export const TASK_WRITE_KEY = ['task-write'] as const;
 
 /** Options every task write shares: no retry, and the task-write key. */
-const TASK_WRITE = { ...NO_RETRY, mutationKey: TASK_WRITE_KEY } as const;
+export const TASK_WRITE = { ...NO_RETRY, mutationKey: TASK_WRITE_KEY } as const;
 
 // What is being written to a task right now
 //
@@ -1249,14 +1310,14 @@ export function useUpdateTask() {
   return useMutation({
     ...TASK_WRITE,
     mutationFn: updateTask,
-    onMutate: async ({ taskId, status, text }) => {
+    onMutate: async ({ taskId, status, text, flagged, icon }) => {
       // Every namespace under `all`: the same attributes are embedded in the
       // detail read, the journal listings and the upcoming window alike.
       await queryClient.cancelQueries({ queryKey: taskKeys.all });
 
       const previous = snapshotTaskAttributes(queryClient, taskId);
 
-      const patch = optimisticPatch({ status, text });
+      const patch = optimisticPatch({ status, text, flagged, icon });
       queryClient.setQueriesData<CachedTaskPayload>(
         { queryKey: taskKeys.all },
         cached => patchCachedTask(cached, taskId, patch)
@@ -1280,6 +1341,15 @@ export function useUpdateTask() {
         );
       });
       restoreTasksToDashboards(queryClient, context?.removed ?? []);
+      // Moving a done journal-only task onto a due journal asks first, as a
+      // retarget does: that refusal is a question for the caller to put to the
+      // user, not a failure to report.
+      if (
+        error instanceof TaskApiError &&
+        error.code === TASK_REOPEN_NOT_ACKNOWLEDGED
+      ) {
+        return;
+      }
       reportFailure(error);
     },
     onSuccess: (_, { status }) => {
@@ -1291,10 +1361,20 @@ export function useUpdateTask() {
     // applied from a snapshot that may itself be stale, so the refetch is worth
     // as much on that path as on the happy one.
     onSettled: (_data, _error, { taskId }) => {
-      // Only the last task write standing refetches — see `isLastTaskWrite`.
-      // Refreshing while another is in flight would answer from a server that
-      // has not processed it, undoing its optimistic removal on screen.
-      if (!isLastTaskWrite(queryClient)) return;
+      // Only the last task write standing refreshes the shared surfaces — see
+      // `isLastTaskWrite`. Refreshing them while another is in flight would
+      // answer from a server that has not processed it, undoing its optimistic
+      // removal on screen. But that write refreshes them for *its* task only,
+      // so this task's own detail and history are refreshed here regardless:
+      // a due date or due journal sent here is not patched optimistically.
+      if (!isLastTaskWrite(queryClient)) {
+        void invalidateAfterMutation(
+          queryClient,
+          { queryKey: taskKeys.detail(taskId) },
+          { queryKey: taskHistoryKeys.forTask(taskId) }
+        );
+        return;
+      }
 
       // The due counts go in the same call because a PATCH may carry a status,
       // and a status change is exactly what adds a commitment to a journal's

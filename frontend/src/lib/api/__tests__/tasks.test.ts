@@ -11,9 +11,11 @@ import {
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import React, { ReactNode } from 'react';
+import { taskListKeys } from '../task-list-keys';
 import {
   CONTACT_NOT_FOUND,
   TASK_DUE_JOURNAL_NOT_FUTURE,
+  TASK_REOPEN_NOT_ACKNOWLEDGED,
   TASK_JOURNAL_IS_ANCHOR,
   TASK_VALIDATION_ERROR,
   TaskApiError,
@@ -147,6 +149,8 @@ const baseTaskAttributes: TaskResponse['data']['attributes'] = {
   intermediate_journal_ids: [],
   task_list_id: null,
   due_date: null,
+  flagged: false,
+  icon: null,
   created_at: '2026-08-11T00:00:00Z',
   updated_at: '2026-08-11T00:00:00Z',
 };
@@ -164,6 +168,7 @@ function taskReadResponse(
         creating_journal: creatingJournal,
         due_journal: dueJournal,
         intermediate_journals: [],
+        task_list: null,
         contacts: [],
         lapsed: false,
         lapse_reason: null,
@@ -672,8 +677,10 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskKeys.onLists(),
           homeDashboardKeys.all,
           journalKeys.lists(),
+          taskListKeys.listings(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task created successfully');
@@ -824,6 +831,63 @@ describe('Task API client', () => {
       });
     });
 
+    it('sends the flag, icon and dates it was given, null included, and nothing else', async () => {
+      mockFetch.mockResolvedValue(jsonResponse(taskWriteResponse()));
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+
+      await result.current.mutateAsync({
+        taskId: '1',
+        flagged: true,
+        icon: null,
+        due_date: null,
+      });
+      expect(requestBody()).toEqual({
+        data: {
+          type: 'tasks',
+          id: '1',
+          // `null` is "clear it": absent would be "leave it alone".
+          attributes: { flagged: true, icon: null, due_date: null },
+        },
+      });
+
+      mockFetch.mockClear();
+      await result.current.mutateAsync({
+        taskId: '1',
+        due_journal_id: 42,
+        status: TaskStatus.NOT_DONE,
+        acknowledge_reopen: true,
+      });
+      expect(requestBody()).toEqual({
+        data: {
+          type: 'tasks',
+          id: '1',
+          attributes: {
+            status: 'not_done',
+            due_journal_id: 42,
+            acknowledge_reopen: true,
+          },
+        },
+      });
+    });
+
+    it('does not toast the reopen question, which the caller answers', async () => {
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(409, TASK_REOPEN_NOT_ACKNOWLEDGED, 'Reopen it?')
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+
+      await expect(
+        result.current.mutateAsync({ taskId: '1', due_journal_id: 42 })
+      ).rejects.toMatchObject({ code: TASK_REOPEN_NOT_ACKNOWLEDGED });
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
     it('refreshes the task, its history, and the two listings that embed it', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
       const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
@@ -842,9 +906,11 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskKeys.onLists(),
           taskHistoryKeys.forTask('1'),
           homeDashboardKeys.all,
           journalKeys.lists(),
+          taskListKeys.listings(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task marked done');
@@ -1778,6 +1844,123 @@ describe('Task API client', () => {
     });
   });
 
+  describe('useUpdateTask optimistic flag and icon', () => {
+    const listKey = taskKeys.journalList('7');
+
+    function cachedTask() {
+      return queryClient
+        .getQueryData<JournalTasksResponse>(listKey)
+        ?.data.find(entry => entry.id === '1')?.attributes;
+    }
+
+    it('shows a new flag and icon before the response lands', async () => {
+      queryClient.setQueryData(listKey, journalTasksResponse());
+      const release = heldRequest(() =>
+        jsonResponse(taskWriteResponse({ flagged: true, icon: 'tent' }))
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        flagged: true,
+        icon: 'tent',
+      });
+
+      await waitFor(() => {
+        expect(cachedTask()?.flagged).toBe(true);
+      });
+      expect(cachedTask()?.icon).toBe('tent');
+
+      release();
+      await settled;
+    });
+
+    it('puts the flag and icon back when the write fails', async () => {
+      queryClient.setQueryData(listKey, journalTasksResponse());
+      mockFetch.mockResolvedValueOnce(
+        errorResponse(500, 'INTERNAL_ERROR', 'Something went wrong')
+      );
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      await expect(
+        result.current.mutateAsync({ taskId: '1', flagged: true, icon: 'tent' })
+      ).rejects.toThrow();
+
+      expect(cachedTask()?.flagged).toBe(false);
+      expect(cachedTask()?.icon).toBeNull();
+    });
+
+    it('leaves a date change to the refetch: overdue needs the day boundary', async () => {
+      const listing = journalTasksResponse();
+      listing.data[0].attributes.task_list_id = 9;
+      listing.data[0].attributes.overdue = true;
+      listing.data[0].attributes.due_date = '2026-11-01';
+      queryClient.setQueryData(listKey, listing);
+      const release = heldRequest(() => jsonResponse(taskWriteResponse()));
+
+      const { result } = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      const settled = result.current.mutateAsync({
+        taskId: '1',
+        due_date: '2026-12-24',
+      });
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      expect(cachedTask()?.due_date).toBe('2026-11-01');
+      expect(cachedTask()?.overdue).toBe(true);
+
+      release();
+      await settled;
+    });
+  });
+
+  describe('useUpdateTask settling behind another task write', () => {
+    it("still refreshes its own task's detail and history", async () => {
+      // The other write refreshes the shared surfaces when it settles, but
+      // only its own task's detail: a due date sent here is not patched
+      // optimistically, so without this the detail would keep the old one.
+      const releaseOther = heldRequest(() => jsonResponse(taskWriteResponse()));
+      mockFetch.mockResolvedValueOnce(jsonResponse(taskWriteResponse()));
+      const invalidateSpy = jest.spyOn(queryClient, 'invalidateQueries');
+
+      const other = renderHook(() => useRetargetTask(), {
+        wrapper: createWrapper,
+      });
+      const update = renderHook(() => useUpdateTask(), {
+        wrapper: createWrapper,
+      });
+      act(() => {
+        other.result.current.mutate({ taskId: '2', due_journal_id: 42 });
+      });
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+      await update.result.current.mutateAsync({
+        taskId: '1',
+        due_journal_id: 43,
+      });
+
+      await waitFor(() => {
+        expect(invalidatedKeys(invalidateSpy)).toEqual(
+          expect.arrayContaining([
+            taskKeys.detail('1'),
+            taskHistoryKeys.forTask('1'),
+          ])
+        );
+      });
+      // The shared surfaces are left to the write still out.
+      expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
+        taskKeys.journalLists()
+      );
+
+      act(() => releaseOther());
+      await waitFor(() => expect(other.result.current.isSuccess).toBe(true));
+    });
+  });
+
   describe('useRetargetTask', () => {
     it('posts the retarget operation with an explicit boolean acknowledgement', async () => {
       mockFetch.mockResolvedValueOnce(
@@ -1843,9 +2026,11 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskKeys.onLists(),
           taskHistoryKeys.forTask('1'),
           homeDashboardKeys.all,
           journalKeys.lists(),
+          taskListKeys.listings(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith(
@@ -1931,8 +2116,10 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskKeys.onLists(),
           homeDashboardKeys.all,
           journalKeys.lists(),
+          taskListKeys.listings(),
         ]);
       });
       expect(toast.success).toHaveBeenCalledWith('Task deleted successfully');
@@ -2004,6 +2191,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskKeys.onLists(),
           taskHistoryKeys.forTask('1'),
           homeDashboardKeys.all,
         ]);
@@ -2033,6 +2221,7 @@ describe('Task API client', () => {
           taskKeys.detail('1'),
           taskKeys.journalLists(),
           taskKeys.upcoming(),
+          taskKeys.onLists(),
           taskHistoryKeys.forTask('1'),
           homeDashboardKeys.all,
         ]);
@@ -2089,6 +2278,8 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.detail('1'),
           taskKeys.journalLists(),
+          // A list's tasks embed their intermediate journals too.
+          taskKeys.onLists(),
         ]);
       });
       expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(
@@ -2122,6 +2313,8 @@ describe('Task API client', () => {
         expect(invalidatedKeys(invalidateSpy)).toEqual([
           taskKeys.detail('1'),
           taskKeys.journalLists(),
+          // A list's tasks embed their intermediate journals too.
+          taskKeys.onLists(),
         ]);
       });
       expect(invalidatedKeys(invalidateSpy)).not.toContainEqual(

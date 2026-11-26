@@ -27,6 +27,8 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React, { ReactNode } from 'react';
 import { taskHistoryKeys, taskKeys, useUpdateTask } from '../tasks';
+import { taskListHistoryKeys, taskListKeys } from '../task-list-keys';
+import { useUpdateTaskList } from '../task-lists';
 import { TaskStatus } from '@/types/tasks';
 import { mockApiResponse } from '@/test-utils';
 import {
@@ -301,5 +303,119 @@ describe('a task write refreshes the history the user is looking at', () => {
       ).toBeUndefined();
     });
     expect(queryClient.getQueryState(other)?.isInvalidated).toBe(false);
+  });
+});
+
+/**
+ * Lists and tasks, across their two roots.
+ *
+ * A list is not a task resource, so it has a root of its own and a task write
+ * must neither cancel nor patch it — but a task write *does* move a list's
+ * `open_task_count`, and a list write *does* change the `task_list` every task
+ * read embeds. Those two dependencies are named explicitly by the mutations,
+ * and these tests ask the cache whether each was reached.
+ */
+describe('lists and tasks refresh each other across their roots', () => {
+  const activeListing = taskListKeys.listing({ archived: 'active' });
+
+  /** A list whose id is the same as task 1's, as ids are per table. */
+  const listingWithListOne = {
+    data: [
+      {
+        type: 'task-lists',
+        id: '1',
+        attributes: { name: 'Packing', open_task_count: 2 },
+      },
+    ],
+  };
+
+  it('keeps lists and their history outside the task namespace', () => {
+    expect(taskListKeys.all[0]).not.toBe(taskKeys.all[0]);
+    expect(taskListHistoryKeys.all[0]).not.toBe(taskKeys.all[0]);
+  });
+
+  it('keeps the list-task namespace a sibling of the others, both ways', async () => {
+    const keys = {
+      detail: taskKeys.detail('1'),
+      journal: taskKeys.journalList('7'),
+      upcoming: taskKeys.upcomingWindow(7),
+      onList: taskKeys.openOnList('3'),
+    };
+    Object.values(keys).forEach(key =>
+      queryClient.setQueryData(key, { data: [] })
+    );
+
+    await queryClient.invalidateQueries({ queryKey: taskKeys.onLists() });
+    expect(queryClient.getQueryState(keys.onList)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(keys.detail)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(keys.journal)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(keys.upcoming)?.isInvalidated).toBe(false);
+
+    queryClient.setQueryData(keys.onList, { data: [] });
+    await queryClient.invalidateQueries({ queryKey: taskKeys.journalLists() });
+    await queryClient.invalidateQueries({ queryKey: taskKeys.upcoming() });
+    await queryClient.invalidateQueries({ queryKey: taskKeys.details() });
+    expect(queryClient.getQueryState(keys.onList)?.isInvalidated).toBe(false);
+  });
+
+  it('a status tick neither patches nor cancels the lists, though it moves their counts', async () => {
+    queryClient.setQueryData(activeListing, listingWithListOne);
+    const cancelSpy = jest.spyOn(queryClient, 'cancelQueries');
+
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: createWrapper,
+    });
+    result.current.mutate({ taskId: '1', status: TaskStatus.DONE });
+
+    // The open count moved, so the listing is re-read...
+    await waitFor(() => {
+      expect(queryClient.getQueryState(activeListing)?.isInvalidated).toBe(
+        true
+      );
+    });
+    // ...but the optimistic patch, which matches task ids, never touched list 1.
+    expect(queryClient.getQueryData(activeListing)).toEqual(listingWithListOne);
+    // And the only cancel that reached the lists is the one that precedes
+    // their refresh, never the optimistic one over `taskKeys.all`.
+    const optimisticCancel = cancelSpy.mock.calls[0][0] as {
+      queryKey: readonly unknown[];
+    };
+    expect(optimisticCancel.queryKey).toEqual(taskKeys.all);
+  });
+
+  it('a task write refreshes the tasks shown on a list', async () => {
+    const onList = taskKeys.openOnList('3');
+    queryClient.setQueryData(onList, { data: [], meta: { total: 0 } });
+
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: createWrapper,
+    });
+    result.current.mutate({ taskId: '1', text: 'Pack the tent' });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(onList)?.isInvalidated).toBe(true);
+    });
+  });
+
+  it('a list rename refreshes a task read that embeds the list, and the list history', async () => {
+    const detail = taskKeys.detail('5');
+    const history = taskListHistoryKeys.list('3', 1, 5);
+    queryClient.setQueryData(detail, { data: { id: '5', attributes: {} } });
+    queryClient.setQueryData(history, { data: [] });
+    mockFetch.mockResolvedValue(
+      mockApiResponse({
+        data: { type: 'task-lists', id: '3', attributes: { name: 'Trip' } },
+      })
+    );
+
+    const { result } = renderHook(() => useUpdateTaskList(), {
+      wrapper: createWrapper,
+    });
+    result.current.mutate({ listId: '3', name: 'Trip' });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryState(detail)?.isInvalidated).toBe(true);
+    });
+    expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true);
   });
 });

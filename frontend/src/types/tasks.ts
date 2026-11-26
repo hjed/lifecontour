@@ -9,6 +9,9 @@
  */
 
 import { JsonApiLinks, JsonApiMeta } from './api';
+import type { HistoryPaginationMeta } from './history';
+import type { TaskIcon } from './task-icons';
+import type { TaskListRef } from './task-lists';
 
 /**
  * A task's status. Values must match the backend `TaskStatus` enum.
@@ -101,6 +104,10 @@ export interface TaskAttributes {
    * list task has at most one of this and a due journal.
    */
   due_date: string | null;
+  /** "This one matters" — an on/off marker on every task, journal-only included. */
+  flagged: boolean;
+  /** A key from the fixed icon set, or `null` for no icon. */
+  icon: TaskIcon | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -113,6 +120,8 @@ export interface TaskReadAttributes extends TaskAttributes {
   due_journal: TaskJournalRef | null;
   /** Same order and membership as `intermediate_journal_ids`, resolved. */
   intermediate_journals: TaskJournalRef[];
+  /** `task_list_id` resolved; `null` exactly when that is. */
+  task_list: TaskListRef | null;
   contacts: TaskContactRef[];
   /**
    * Still not done, and the due journal has either passed or been cancelled.
@@ -195,6 +204,39 @@ export interface JournalTasksResponse {
   meta: JournalTasksMeta;
 }
 
+/**
+ * What `GET /api/task-lists/{id}/tasks` answers with: the list's **open**
+ * tasks in the user's manual order, read whole. Unpaginated; `meta.total` is
+ * the count.
+ */
+export interface ListTasksResponse {
+  data: TaskReadResource[];
+  meta: { total: number };
+}
+
+/**
+ * What `GET /api/task-lists/{id}/tasks/completed` answers with: one page of
+ * the list's done and cancelled tasks, most recently closed first.
+ *
+ * Page from `meta`, not from `links`: the backend builds `links` as absolute
+ * URLs from its own base URL, which need not be the origin the browser talks
+ * to, and sends `next: null` on the last page rather than leaving it out.
+ */
+export interface CompletedListTasksResponse {
+  data: TaskReadResource[];
+  meta: HistoryPaginationMeta;
+  links?: JsonApiLinks | null;
+}
+
+/**
+ * What a reorder answers with: the list's open tasks in their new order, in
+ * the **write** shape — no journals, contacts or `overdue`. Its ids are the
+ * order; its rows are not a substitute for the read models a list page holds.
+ */
+export interface TaskCollectionResponse {
+  data: TaskResource[];
+}
+
 /** Creating a task in the journal it arose from, which the path names. */
 export interface TaskCreateInput {
   /**
@@ -209,17 +251,79 @@ export interface TaskCreateInput {
 }
 
 /**
- * Changing a task's text, its status, or both.
+ * Creating a task at the bottom of one of the user's lists, in no journal.
  *
- * A union rather than two optional fields, because the backend refuses a body
- * naming *neither* and that refusal should not be reachable from typed code:
- * `{ taskId }` alone would compile, send `attributes: {}` and come back a 400.
- * Each arm requires one attribute and leaves the other optional, so all three
- * legitimate shapes type-check and the empty one does not.
+ * At most one date: a due date (`YYYY-MM-DD`, today or later) **or** a due
+ * journal (dated in the future). The backend refuses both together, so the
+ * union does too.
  */
-export type TaskUpdateInput = { taskId: string } & (
-  { text: string; status?: TaskStatus } | { status: TaskStatus; text?: string }
+export type ListTaskCreateInput = {
+  /** The list, sent in the path. */
+  listId: string;
+  text: string;
+  contact_ids?: number[];
+} & (
+  | { due_date?: string; due_journal_id?: never }
+  | { due_journal_id?: number; due_date?: never }
 );
+
+/** Everything a task `PATCH` can change. `null` clears; absent keeps. */
+interface TaskChanges {
+  text: string;
+  status: TaskStatus;
+  /** A JSON boolean: the backend refuses `null`. */
+  flagged: boolean;
+  icon: TaskIcon | null;
+  /** A list task's due day (`YYYY-MM-DD`), or `null` to make it undated. */
+  due_date: string | null;
+  /**
+   * A list task's due journal, or `null` to clear it. On a journal-only task
+   * this is a retarget, and cannot be cleared.
+   */
+  due_journal_id: number | null;
+}
+
+/** Exactly one of `TaskChanges` required, the rest optional. */
+type OneChange = {
+  [K in keyof TaskChanges]: Pick<TaskChanges, K> &
+    Partial<Omit<TaskChanges, K>>;
+}[keyof TaskChanges];
+
+/**
+ * Changing anything a task `PATCH` takes, in one write.
+ *
+ * A union, because the backend refuses a body naming no change and that
+ * refusal should not be reachable from typed code: `{ taskId }` alone would
+ * compile, send `attributes: {}` and come back a 400. Each arm requires one
+ * change and leaves the others optional, so every legitimate shape
+ * type-checks and the empty one does not. `acknowledge_reopen` confirms that
+ * moving a *done* journal-only task onto a due journal reopens it — it is not
+ * a change on its own.
+ */
+export type TaskUpdateInput = {
+  taskId: string;
+  acknowledge_reopen?: boolean;
+} & OneChange &
+  // A list task has a due date or a due journal, never both, and the backend
+  // refuses a body setting the two together.
+  ({ due_date?: never } | { due_journal_id?: never });
+
+/**
+ * Moving an open list task to the top (`afterTaskId: null`) or directly after
+ * another open task on the same list.
+ */
+export interface ListTaskReorderInput {
+  taskId: string;
+  /** The list the task is on, whose cached open tasks are re-ordered. */
+  listId: string;
+  afterTaskId: string | null;
+}
+
+/** Putting a task on a list, or moving it to another. It joins the bottom. */
+export interface TaskMoveInput {
+  taskId: string;
+  taskListId: string;
+}
 
 /** Moving a task onto a new due journal, which always leaves it not done. */
 export interface TaskRetargetInput {

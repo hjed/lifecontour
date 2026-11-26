@@ -8,6 +8,8 @@
 import { APIResponse, Page } from '@playwright/test';
 
 import { TestContact, TestJournal, TestTask } from './fixtures';
+import type { TaskListResponse } from '../../src/types/task-lists';
+import type { TaskResponse } from '../../src/types/tasks';
 
 /**
  * Utility function to generate realistic phone numbers
@@ -93,24 +95,6 @@ export interface TestListTask {
   taskListId: string;
   dueDate: string | null;
   dueJournalId: string | null;
-}
-
-/**
- * The fields of a task-list or list-task write response these fixtures read.
- * Local rather than from `src/types`, which has no task-list types until the
- * web app reads lists.
- */
-interface ListWriteResponse {
-  data: {
-    id: string;
-    attributes: {
-      name?: string;
-      text?: string;
-      task_list_id?: number | null;
-      due_date?: string | null;
-      due_journal_id?: number | null;
-    };
-  };
 }
 
 export interface TagCreateRequest {
@@ -1727,10 +1711,10 @@ export class TestDataManager {
       );
     }
 
-    const resource = ((await response.json()) as ListWriteResponse).data;
-    this.createdTaskListIds.push(String(resource.id));
+    const resource = ((await response.json()) as TaskListResponse).data;
+    this.createdTaskListIds.push(resource.id);
     console.debug(`📝 [Data Manager] Created task list ${resource.id}`);
-    return { id: String(resource.id), name: resource.attributes.name ?? name };
+    return { id: resource.id, name: resource.attributes.name };
   }
 
   /**
@@ -1806,8 +1790,8 @@ export class TestDataManager {
       );
     }
 
-    const resource = ((await response.json()) as ListWriteResponse).data;
-    this.createdTaskIds.push(String(resource.id));
+    const resource = ((await response.json()) as TaskResponse).data;
+    this.createdTaskIds.push(resource.id);
     if (resource.attributes.task_list_id == null) {
       throw new Error(`Task ${resource.id} came back on no list`);
     }
@@ -1815,10 +1799,10 @@ export class TestDataManager {
       `✅ [Data Manager] Created task ${resource.id} on list ${taskData.taskListId}`
     );
     return {
-      id: String(resource.id),
-      text: resource.attributes.text ?? taskData.text,
+      id: resource.id,
+      text: resource.attributes.text,
       taskListId: String(resource.attributes.task_list_id),
-      dueDate: resource.attributes.due_date ?? null,
+      dueDate: resource.attributes.due_date,
       dueJournalId:
         resource.attributes.due_journal_id == null
           ? null

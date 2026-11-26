@@ -194,9 +194,12 @@ export function createMockJournalTask(
       intermediate_journal_ids: [],
       task_list_id: null,
       due_date: null,
+      flagged: false,
+      icon: null,
       creating_journal: createMockTaskJournalRef(),
       due_journal: createMockTaskJournalRef(),
       intermediate_journals: [],
+      task_list: null,
       contacts: [],
       lapsed: false,
       lapse_reason: null,
@@ -219,6 +222,7 @@ export function createMockListTask(
 ): JournalTaskResource {
   return createMockJournalTask({
     task_list_id: 7,
+    task_list: { id: 7, name: 'Packing', icon: null, archived: false },
     creating_journal_id: null,
     due_journal_id: null,
     creating_journal: null,
