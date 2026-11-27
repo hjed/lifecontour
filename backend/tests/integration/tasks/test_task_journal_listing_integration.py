@@ -41,6 +41,7 @@ from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_read_service import TaskReadService
 from tests.integration.statement_recorder import recorded_statements
 from tests.integration.tasks.task_seeding import (
+    FIXED_PAST_INSTANT,
     OTHER_USER_ID,
     USER_ID,
     create_contact,
@@ -297,7 +298,7 @@ class TestLapseAgainstRealJournals:
     ) -> None:
         """The ordinary lapse, from a journal whose day has gone."""
         viewed = await seed_viewed_journal(journal_repository)
-        due = await create_journal(journal_repository, days_offset=-1)
+        due = await create_journal(journal_repository, start=FIXED_PAST_INSTANT)
         await create_task(
             async_connection, creating_journal_id=viewed, due_journal_id=due
         )
@@ -316,7 +317,7 @@ class TestLapseAgainstRealJournals:
     ) -> None:
         """A commitment met or called off cannot then be let slide."""
         viewed = await seed_viewed_journal(journal_repository)
-        due = await create_journal(journal_repository, days_offset=-1)
+        due = await create_journal(journal_repository, start=FIXED_PAST_INSTANT)
         await create_task(
             async_connection,
             creating_journal_id=viewed,
@@ -363,7 +364,7 @@ class TestLapseAgainstRealJournals:
     ) -> None:
         """ "They remain visible on every journal they are linked to."""
         viewed = await seed_viewed_journal(journal_repository)
-        due = await create_journal(journal_repository, days_offset=-1)
+        due = await create_journal(journal_repository, start=FIXED_PAST_INSTANT)
         task_id = await create_task(
             async_connection, creating_journal_id=viewed, due_journal_id=due
         )
