@@ -13,6 +13,8 @@ import { test, expect } from './fixtures';
 
 const HARNESS = '/e2e-harness/task-icon-picker';
 const MIN_TOUCH_TARGET = 44;
+/** The `gap-2` between the search field and its status message. */
+const ROW_GAP = 8;
 
 async function openPicker(page: Page) {
   await page.goto(HARNESS);
@@ -133,6 +135,29 @@ test.describe('Task icon picker', () => {
       for (const target of await tiles.all()) {
         await expectTouchTarget(target);
       }
+    });
+
+    test('keeps the search field usable when a long search matches nothing', async ({
+      page,
+    }) => {
+      await openPicker(page);
+      const query = 'a-very-long-search-that-matches-no-icon-at-all';
+
+      await searchField(page).fill(query);
+
+      const message = pickerText(page, `No icons match "${query}"`);
+      await expect(message).toBeVisible();
+      const field = await searchField(page).boundingBox();
+      const beside = await message.boundingBox();
+      expect(field).not.toBeNull();
+      expect(beside).not.toBeNull();
+      expect(field!.width).toBeGreaterThanOrEqual(beside!.width - ROW_GAP);
+      await expectTouchTarget(searchField(page));
+      const overflow = await message.evaluate(el => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      }));
+      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
     });
   });
 });

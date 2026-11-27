@@ -884,7 +884,9 @@ Tasks and lists carry an optional icon from a fixed set (`TASK_ICONS`,
 - **`TaskIconPicker`** (`components/tasks/`) is a controlled
   `value: TaskIcon | null` / `onChange` control, following the canvas's *Task
   details* artboard: a search field, one `role="status"` line saying what the
-  grid holds ("40 icons", "1 icon", *No icons match "…"*), and a scrolling grid
+  grid holds ("40 icons", "1 icon", *No icons match "…"*) — capped at half the
+  row and wrapping anywhere, because it repeats the query and would otherwise
+  squeeze the field off a phone screen — and a scrolling grid
   with **No icon** first. It departs from the artboard in three places: tiles
   are 44px rather than 40px (the phone touch-target rule), a "Chosen: …" caption
   replaces the help line so a sighted user sees the name they would search for,
