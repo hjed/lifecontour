@@ -65,7 +65,7 @@ export function TaskIconPicker({
           />
           <span
             role='status'
-            className='text-muted-foreground shrink-0 text-xs'
+            className='text-muted-foreground max-w-1/2 text-right text-xs wrap-anywhere'
           >
             {situation(query, offered.length)}
           </span>
