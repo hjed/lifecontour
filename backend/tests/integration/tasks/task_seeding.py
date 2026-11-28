@@ -23,12 +23,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from core_shared.models.history import Provenance
 from core_shared.models.journals import EventDateRange, Journal
 from core_shared.models.journals.event_state import EventState
-from core_shared.models.tasks import TaskIcon, TaskList, TaskStatus
+from core_shared.models.tasks import TaskIcon, TaskList, TaskRecurrence, TaskStatus
 from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -44,7 +44,10 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
+from app.core.tasks.adapters.sql.task_repository import (
+    SqlTaskRepository,
+    recurrence_columns,
+)
 from app.core.tasks.models.task_list_events import TASK_LIST_EVENT_TYPES
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.di.contacts import ContactProvider
@@ -92,13 +95,22 @@ _INSERT_TASK = text(f"""
 _INSERT_LIST_TASK = text(f"""
     INSERT INTO tasks (
         user_id, text, status, task_list_id, position,
-        creating_journal_id, due_journal_id, due_date, flagged, icon, closed_at
+        creating_journal_id, due_journal_id, due_date, flagged, icon, closed_at,
+        recurrence_mode, recurrence_interval_count, recurrence_interval_unit,
+        recurrence_series_id, recurrence_of_task_id
     )
     VALUES (
         :user_id, :text, :status, :task_list_id, :position,
         :creating_journal_id, :due_journal_id, :due_date, :flagged, :icon,
-        {_CLOSED_AT_FROM_STATUS}
+        {_CLOSED_AT_FROM_STATUS},
+        :recurrence_mode, :recurrence_interval_count, :recurrence_interval_unit,
+        :recurrence_series_id, :recurrence_of_task_id
     )
+    RETURNING id
+""")
+_INSERT_SERIES = text("""
+    INSERT INTO journal_series (user_id, name)
+    VALUES (:user_id, :name)
     RETURNING id
 """)
 _INSERT_INTERMEDIATE = text("""
@@ -216,6 +228,8 @@ async def create_list_task(
     text: str = "pack the head torch",
     status: TaskStatus = TaskStatus.NOT_DONE,
     user_id: str = USER_ID,
+    recurrence: TaskRecurrence | None = None,
+    recurrence_of_task_id: int | None = None,
 ) -> int:
     """Insert a task on a list directly and return its id.
 
@@ -238,10 +252,25 @@ async def create_list_task(
                 "due_date": due_date,
                 "flagged": flagged,
                 "icon": None if icon is None else icon.value,
+                **recurrence_columns(recurrence),
+                "recurrence_of_task_id": recurrence_of_task_id,
             },
         )
     ).scalar_one()
     return int(task_id)
+
+
+async def seed_series(
+    conn: AsyncConnection, name: str = "Weekly review", *, user_id: str = USER_ID
+) -> UUID:
+    """Insert a journal series directly and return its id.
+
+    Only a task's recurrence refers to it here, so its journals do not matter.
+    """
+    series_id: UUID = (
+        await conn.execute(_INSERT_SERIES, {"user_id": user_id, "name": name})
+    ).scalar_one()
+    return series_id
 
 
 async def link_intermediate_journal(

@@ -16,9 +16,15 @@ and never "was that your task".
 
 from collections.abc import Callable, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, assert_never
 
 from core_shared.models.tasks import (
+    IntervalRecurrence,
+    NoDateRecurrence,
+    RecurrenceInterval,
+    RecurrenceIntervalUnit,
+    RecurrenceMode,
+    SeriesRecurrence,
     Task,
     TaskIcon,
     TaskListChangedConcurrentlyError,
@@ -26,6 +32,7 @@ from core_shared.models.tasks import (
     TaskListNotFoundError,
     TaskNotFoundError,
     TaskPage,
+    TaskRecurrence,
     TaskStatus,
     reorder_open_tasks,
 )
@@ -51,6 +58,11 @@ _TASK_COLUMN_NAMES = (
     "due_date",
     "flagged",
     "icon",
+    "recurrence_mode",
+    "recurrence_interval_count",
+    "recurrence_interval_unit",
+    "recurrence_series_id",
+    "recurrence_of_task_id",
     "created_at",
     "updated_at",
 )
@@ -173,11 +185,11 @@ _INSERT_JOURNAL_TASK = text(
     f"""
     INSERT INTO tasks (
         user_id, text, status, creating_journal_id, due_journal_id,
-        flagged, icon, closed_at
+        flagged, icon, recurrence_of_task_id, closed_at
     )
     VALUES (
         :user_id, :text, :status, :creating_journal_id, :due_journal_id,
-        :flagged, :icon, {_CLOSED_AT_ON_INSERT}
+        :flagged, :icon, :recurrence_of_task_id, {_CLOSED_AT_ON_INSERT}
     )
     RETURNING {_TASK_COLUMNS}
     """
@@ -188,12 +200,16 @@ _INSERT_LIST_TASK = text(
     f"""
     INSERT INTO tasks (
         user_id, text, status, creating_journal_id, due_journal_id,
-        task_list_id, position, due_date, flagged, icon, closed_at
+        task_list_id, position, due_date, flagged, icon,
+        recurrence_mode, recurrence_interval_count, recurrence_interval_unit,
+        recurrence_series_id, recurrence_of_task_id, closed_at
     )
     VALUES (
         CAST(:user_id AS VARCHAR), :text, :status, :creating_journal_id,
         :due_journal_id, CAST(:task_list_id AS INTEGER), {_BOTTOM_OF_LIST},
-        :due_date, :flagged, :icon, {_CLOSED_AT_ON_INSERT}
+        :due_date, :flagged, :icon,
+        :recurrence_mode, :recurrence_interval_count, :recurrence_interval_unit,
+        :recurrence_series_id, :recurrence_of_task_id, {_CLOSED_AT_ON_INSERT}
     )
     RETURNING {_TASK_COLUMNS}
     """
@@ -352,9 +368,61 @@ def _row_to_task(row: Any) -> Task:
         due_date=row.due_date,
         flagged=row.flagged,
         icon=None if row.icon is None else TaskIcon(row.icon),
+        recurrence=_row_to_recurrence(row),
+        recurrence_of_task_id=row.recurrence_of_task_id,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _row_to_recurrence(row: Any) -> TaskRecurrence | None:
+    """Rebuild a task's recurrence setting from its stored columns."""
+    if row.recurrence_mode is None:
+        return None
+    mode = RecurrenceMode(row.recurrence_mode)
+    match mode:
+        case RecurrenceMode.NO_DATE:
+            return NoDateRecurrence()
+        case RecurrenceMode.INTERVAL:
+            return IntervalRecurrence(
+                interval=RecurrenceInterval(
+                    count=row.recurrence_interval_count,
+                    unit=RecurrenceIntervalUnit(row.recurrence_interval_unit),
+                )
+            )
+        case RecurrenceMode.SERIES:
+            return SeriesRecurrence(series_id=row.recurrence_series_id)
+        case _:
+            assert_never(mode)
+
+
+def recurrence_columns(recurrence: TaskRecurrence | None) -> dict[str, Any]:
+    """The stored form of a recurrence setting: every column, NULL where unused.
+
+    Every column is always given, so a write that changes the mode also clears
+    what the previous mode stored — the CHECKs refuse any leftover.
+    """
+    columns: dict[str, Any] = {
+        "recurrence_mode": None,
+        "recurrence_interval_count": None,
+        "recurrence_interval_unit": None,
+        "recurrence_series_id": None,
+    }
+    if recurrence is None:
+        return columns
+    columns["recurrence_mode"] = recurrence.mode.value
+    match recurrence:
+        case NoDateRecurrence():
+            return columns
+        case IntervalRecurrence(interval=interval):
+            columns["recurrence_interval_count"] = interval.count
+            columns["recurrence_interval_unit"] = interval.unit.value
+            return columns
+        case SeriesRecurrence(series_id=series_id):
+            columns["recurrence_series_id"] = series_id
+            return columns
+        case _:
+            assert_never(recurrence)
 
 
 def _icon_value(task: Task) -> str | None:
@@ -372,8 +440,11 @@ class SqlTaskRepository(TaskRepository):
     async def save(self, task: Task) -> Task:
         """Insert a new task or update an existing one.
 
-        Writes the task's own values — text, status, anchors, due date, flag and
-        icon. An **update** never writes its list membership (``task_list_id``,
+        Writes the task's own values — text, status, anchors, due date, flag,
+        icon and recurrence setting. ``recurrence_of_task_id`` is written on
+        insert only: where a copy came from never changes.
+
+        An **update** never writes its list membership (``task_list_id``,
         ``position``): joining, leaving, moving and reordering are operations of
         their own, as ``TaskList.position`` is, so an edit carrying a stale
         position cannot undo a reorder that landed after the caller's read.
@@ -405,6 +476,7 @@ class SqlTaskRepository(TaskRepository):
             "due_journal_id": task.due_journal_id,
             "flagged": task.flagged,
             "icon": _icon_value(task),
+            "recurrence_of_task_id": task.recurrence_of_task_id,
         }
         if task.task_list_id is None:
             result = await self.conn.execute(_INSERT_JOURNAL_TASK, params)
@@ -416,6 +488,7 @@ class SqlTaskRepository(TaskRepository):
                     **params,
                     "task_list_id": task.task_list_id,
                     "due_date": task.due_date,
+                    **recurrence_columns(task.recurrence),
                 },
             )
         return _row_to_task(result.fetchone())
@@ -430,9 +503,11 @@ class SqlTaskRepository(TaskRepository):
         the service layer is what refuses to change it.
 
         ``task_list_id`` and ``position`` are not in the SET list either, for the
-        reason ``save`` gives. The due date, flag and icon are: their CHECKs are
-        row-level, and the entity guarantees them against *its* view of the
-        task's list — so callers save a row they read under lock, and a stale
+        reason ``save`` gives, nor is ``recurrence_of_task_id``: unlike the
+        creating anchor, nothing in the product ever rewrites it, so there is no
+        caller to disagree with. The due date, flag, icon and recurrence setting
+        are: their CHECKs are row-level, and the entity guarantees them against
+        *its* view of the task's list — so callers save a row they read under lock, and a stale
         entity whose task has since left its list fails a CHECK rather than
         writing a shape the table forbids.
 
@@ -454,6 +529,10 @@ class SqlTaskRepository(TaskRepository):
                 due_date = :due_date,
                 flagged = :flagged,
                 icon = :icon,
+                recurrence_mode = :recurrence_mode,
+                recurrence_interval_count = :recurrence_interval_count,
+                recurrence_interval_unit = :recurrence_interval_unit,
+                recurrence_series_id = :recurrence_series_id,
                 updated_at = now()
             WHERE id = :id AND user_id = :user_id
             RETURNING {_TASK_COLUMNS}
@@ -471,6 +550,7 @@ class SqlTaskRepository(TaskRepository):
                 "due_date": task.due_date,
                 "flagged": task.flagged,
                 "icon": _icon_value(task),
+                **recurrence_columns(task.recurrence),
             },
         )
         row = result.fetchone()
