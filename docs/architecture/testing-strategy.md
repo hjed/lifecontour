@@ -443,6 +443,27 @@ the value it last handed back).
   context; keep the harness only while it tests something the product page does
   not.
 
+### Phone Layout Assertions
+
+Delivery rule 8 (no sideways scroll, 44px touch targets at 390px) is asserted
+with `frontend/tests/e2e/utils/phone-layout.ts` rather than per-spec copies:
+
+- `expectNoHorizontalScroll(page)` polls `scrollWidth <= clientWidth` on the
+  document element.
+- `expectTouchTarget(locator, { retry })` compares the box to 44px at 0.1px
+  (Firefox lays a 44px tile on a fractional track at 43.999998px); pass
+  `retry` for a target that animates in, such as a dialog zooming from 95%.
+- `expectTouchHitArea(locator)` probes `elementFromPoint` at the edges and
+  corners of the 44px square around the centre, a quarter pixel inside, for a
+  control whose hit area is a pseudo-element no bounding box measures (the
+  list row's checkbox). A 42px or 43px area fails it.
+
+ITER21-002's UI phases add their E2E to `tests/e2e/task-lists.spec.ts`, which
+drives the list page through `tests/e2e/utils/task-lists.ts`
+(`gotoTaskList`, `completeTask`, …) and seeds through `TestDataManager`
+(`createTaskList(name, { icon })`, `createListTask`, `reorderListTask`,
+`deleteTaskList`).
+
 ### The AI Daily Summary in E2E
 
 The e2e stack has no Gemini key. It sets `ENABLE_TEST_DAILY_SUMMARY_STUB=true` (`.env.test`,

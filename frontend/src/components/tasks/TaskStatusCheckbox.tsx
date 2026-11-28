@@ -39,7 +39,7 @@ export function TaskStatusCheckbox({
       aria-describedby={describedById}
       aria-busy={writing}
       aria-disabled={writing || undefined}
-      className='after:-inset-3.5'
+      className='after:-inset-[15px]'
     />
   );
 }
