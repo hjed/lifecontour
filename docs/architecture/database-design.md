@@ -559,7 +559,11 @@ Introduced by migration `0105` (create/drop round-trip).
   `task_list_id` (int, nullable, FK → `task_lists.id`), `position` (int, nullable), `due_date`
   (date, nullable — a calendar day in the user's timezone), `flagged` (boolean, default `false`) and
   `icon` (varchar 50, nullable); indexed by `(task_list_id, position)`. Since migration `0147` also
-  `closed_at` (timestamptz, nullable — when the task was last closed). See *Tasks on a list* below.
+  `closed_at` (timestamptz, nullable — when the task was last closed). Since migration `0150`
+  (ITER21-006) also the recurrence setting — `recurrence_mode` (varchar 20, nullable), the interval
+  `recurrence_interval_count` (int) and `recurrence_interval_unit` (varchar 10), and
+  `recurrence_series_id` (UUID) — plus `recurrence_of_task_id` (int), the task a copy was made from.
+  See *Tasks on a list* and *Recurring tasks* below.
 - `task_intermediate_journals` — `task_id` (FK → `tasks.id`), `journal_id` (FK → `journals.id`),
   `created_at`; `PRIMARY KEY (task_id, journal_id)`, indexed by `journal_id`. Journals where the
   task was discussed, revisited, or previously due.
@@ -582,6 +586,8 @@ timezone, so they live in the service layer where REST and MCP both inherit them
 | `tasks.creating_journal_id` / `due_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal that anchors a **journal-only** task is *blocked*, not cascaded, with an explanatory refusal naming the blocking tasks. A task **on a list** never blocks: the delete service nulls its anchor on the journal first, with a `TaskJournalLinksRemoved` event, so the constraint is only the backstop for a row that races the delete — `SET NULL` would trip `ck_tasks_journal_only_has_both_anchors` for journal-only tasks and publish nothing. **Merge is the exception** — it re-points the anchors onto the survivor first, so it is never blocked (see below). |
 | `task_lists.associated_journal_id` | `journals.id` | **`RESTRICT`** | Deleting a journal leaves its lists unassociated and merging moves them to the survivor (spec *Association with a journal*), but each of those changes is a list-history event, so the journal services unassociate or re-point the lists themselves before the journal row goes. A delete does it in `TaskJournalDeletionService.unassociate_lists`, inside the delete's savepoint and after its task detach (ITER21-005 Phase 2a); a merge in `TaskJournalMergeService.repoint_list_associations`, in step 0 after the task re-point (Phase 2c). Each publishes a `TaskListUpdated` per list. The constraint is the backstop that makes a path which forgot fail, where `SET NULL` would drop the association silently. Those services land before anything can write an association. PostgreSQL reports the refusal as SQLSTATE `23001`. |
 | `tasks.task_list_id` | `task_lists.id` | **`RESTRICT`** | Deleting a list deletes some of its tasks and turns those holding both journals back into journal-only tasks, each with a domain event, so the list-delete service settles every task first and a raw delete can never destroy tasks silently. PostgreSQL reports the refusal as SQLSTATE `23001` (`restrict_violation`), not `23503`. |
+| `tasks.recurrence_series_id` | `journal_series.id` | **`RESTRICT`** | A series delete makes its recurring tasks fall back to *no date*, and a series merge moves them to the survivor (spec *Recurring Tasks*). Both are recurrence changes with history, so the series services settle every task — closed ones included, since a completed task keeps its setting — before the series row goes. `SET NULL` would leave a series-mode task with no series and fail `ck_tasks_recurrence_series_matches_mode`. SQLSTATE `23001`. |
+| `tasks.recurrence_of_task_id` | `tasks.id` | `SET NULL` | A copy outlives the task it was made from; deleting the original only forgets the link, and history keeps the chain through events. |
 | `task_intermediate_journals.journal_id` | `journals.id` | `CASCADE` | Deleting a journal that is only an intermediate link is permitted; the link goes and the task is unaffected. A list task's link is deleted explicitly by the delete service first, so its removal is announced; a journal-only task's cascades silently. |
 | `task_contacts.contact_id` | `contacts.id` | `CASCADE` | Deleting a contact drops its task links without touching tasks. **Merge is the exception** — it re-points the links onto the survivor first, because otherwise this cascade destroys them (see below). |
 | both link tables' `task_id` | `tasks.id` | `CASCADE` | Deleting a task takes its links with it. |
@@ -922,6 +928,35 @@ owner-checked; reads check it with an `EXISTS` on `task_lists`.
   under `TaskService.move_to_list`, and `remove_from_list` under `TaskService.remove_from_list`.
   Both have a `WritePath` in `test_task_event_completeness_integration.py`.
   `move_within_list` and `arrange_open_tasks` are excluded permanently — the spec gives reordering no event.
+
+#### Recurring tasks (ITER21-006)
+
+Migration `0150` gives a task an optional **recurrence setting** and, on a copy, the task it came
+from (spec *Recurring Tasks*). NULL `recurrence_mode` means the task does not recur. The interval is
+kept as a count and a unit, as entered ("2 weeks"): a PostgreSQL `interval` would normalise it, and
+month and year steps need the domain's month-end rule.
+
+| Constraint | Expression | Rule |
+|---|---|---|
+| `ck_tasks_recurrence_only_on_list` | `recurrence_mode IS NULL OR task_list_id IS NOT NULL` | Invariant 6, its list half (the ordinary-list half needs list kinds, ITER21-007) |
+| `ck_tasks_recurrence_mode` | `recurrence_mode IN ('no_date', 'interval', 'series')` | The three modes |
+| `ck_tasks_recurrence_interval_matches_mode` | count and unit each present exactly when the mode is `interval` | Interval after completion |
+| `ck_tasks_recurrence_interval_unit` | `recurrence_interval_unit IN ('day', 'week', 'month', 'year')` | |
+| `ck_tasks_recurrence_interval_count_positive` | `recurrence_interval_count >= 1` | |
+| `ck_tasks_recurrence_series_matches_mode` | series present exactly when the mode is `series` | Next journal in a series |
+| `ck_tasks_recurrence_of_not_self` | `recurrence_of_task_id <> id` | |
+
+- **Row-level, like 0146's.** A write that takes a task off its list must clear its recurrence in
+  the same statement, or `ck_tasks_recurrence_only_on_list` refuses it.
+- **`recurrence_of_task_id` is neither unique nor list-only.** An original that kept a changed copy
+  can be set recurring again and make a second one; and a copy never has a creating journal, so it
+  can never become journal-only.
+- **Indexes.** Partial indexes `ix_tasks_recurrence_series_id` and `ix_tasks_recurrence_of_task_id`
+  (each `WHERE … IS NOT NULL`) serve the foreign keys' delete checks, a series' recurring tasks and
+  a task's copies.
+- **Owner scoping** is in the services and repositories: both foreign keys are single-column, as for
+  `task_list_id`.
+- The downgrade refuses while any task recurs or records its original.
 
 ### Photo Integration (Iteration 4)
 ```sql
