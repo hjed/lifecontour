@@ -4018,15 +4018,72 @@ archived; the event, its provenance and its place before the journal events) and
 this phase: ruff, mypy, backend unit suite, the full backend integration suite in chunks (5,489
 passed, 7 MeiliSearch skips).
 
-#### Phase 3: Associate, change, remove
+#### Phase 3: Associate, change, remove ✅ DONE
 
 **Prerequisites:** Phases 2a, 2b and 2c.
-**Estimated diff:** ~130 production → **~1,300 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~130 production → **~1,300 tracked** · one capability on REST and MCP together ·
+**Actual:** ~280 production → **~1,500 tracked**, as a three-PR stack (user decision at planning):
+a behaviour-free test factory (124: 55 insertions, 69 deletions), the service rule (710: 101
+production, 596 tests, 13 docs) and the REST and MCP surfaces together (~650: 176 production —
+mostly tool and endpoint docstrings — ~400 tests, ~75 docs). Tests ran ×1.4 on the estimate, mostly
+the two-connection lock-order test and the mock-ordered service test.
 
 **Acceptance Criteria:**
 
-- [ ] Owner-checked journal; carried on the list-updated event (Phase 2a's key) into list history. The journal is locked `FOR KEY SHARE` before the list `FOR NO KEY UPDATE` — the order a journal delete takes, which holds the journal `FOR UPDATE` before it touches any list (see Phase 1's notes).
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Owner-checked journal; carried on the list-updated event (Phase 2a's key) into list history. The journal is locked `FOR KEY SHARE` before the list `FOR NO KEY UPDATE` — the order a journal delete takes, which holds the journal `FOR UPDATE` before it touches any list (see Phase 1's notes).
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:** `TaskListPatch.associated_journal_id` (`int | None | UNSET`) on the existing field
+update, not a route of its own. `TaskListService` takes a required `journal_repo`;
+`update_task_list` holds the joining journal through
+`JournalRepository.find_and_lock_by_ids_for_user` (owner-scoped `FOR KEY SHARE`) before
+`find_by_id_for_update` on the list, and refuses a list that is not the user's, then an archived
+one, then `TaskListJournalNotFoundError` (core_shared; 404 `TASK_LIST_JOURNAL_NOT_FOUND`,
+`meta.field` = `associated_journal_id`, one message for an absent and a foreign journal). Each change
+publishes `TaskListUpdated {associated_journal_id: (old, new)}`; the journal the list already has
+records nothing. REST: `PATCH /api/task-lists/{id}` takes `associated_journal_id` (`StrictInt`
+1..2³¹−1, `null` removes), and the list read, the listing and every write answer carry it. MCP:
+`update_task_list` takes `associated_journal_id` (`JsonIntOnly`) and `clear_associated_journal`
+(not both), and `TaskListMCP` carries the field. Frontend: `TaskListAttributes.associated_journal_id`
+(read only). `tests/task_list_service_factory.py` (`build_task_list_service`) builds the service in
+tests, so the new collaborator was one edit.
+
+**Tests:** unit `test_task_list_service_update.py` (journal locked before the list, no journal lock
+when clearing or leaving it alone, refusal order, archived, no-op, the three pairs and provenance),
+`test_task_error_mapping.py`, `test_task_list_update_schemas.py`, `test_task_list_tools_schema.py`;
+integration `test_task_list_service_integration.py::TestAssociateTaskList` (stored, two lists on one
+journal, task rows untouched, foreign and unknown journal, no-op writes no outbox row), the slow
+`test_task_list_association_lock_order_integration.py` (an association waits on a journal held
+`FOR UPDATE` with the list row still free — checked to fail under a list-first order — then refuses
+a journal deleted meanwhile or associates one kept), `test_task_list_endpoints.py::TestAssociateTaskListEndpoint`,
+`test_task_list_ownership.py` (your journal on their list) and
+`test_task_list_tools_mcp.py::TestAssociateTaskListTool`. Gates run locally: ruff, mypy (backend,
+core_shared), backend unit suite (6,384 passed), core_shared (924), the full backend integration
+suite in chunks on the service layer (5,524 passed, 7 MeiliSearch skips), and the task-list REST and
+MCP suites again on the surfaces layer; frontend `quality:check` and jest (3,680 passed). No E2E: no
+UI.
+
+**Decisions (recorded during implementation):**
+- **A field on the update, not an action route**, as the task's `due_journal_id` is. One request can
+  rename and associate.
+- **The read carries the id only**; Phase 4 reads the journal itself. A resolved ref can be added
+  without breaking a client.
+- **The journal being left is not locked.** A delete or merge of it waits on the list row, then
+  re-checks `associated_journal_id` and skips the list.
+- **Any of the owner's journals may be associated** — past, future or cancelled; the specification
+  sets no rule, and a cancelled one simply does not surface (Phase 7).
+- **An archived list refuses an association change**, set or cleared; Phase 2's system paths still
+  bypass it.
+
+**Notes for later phases:**
+- *Phase 4:* the PATCH is ready; `updateTaskList` (`frontend/src/lib/api/task-lists.ts`) still
+  serialises only `name` and `icon`, so Phase 4 adds the `associated_journal_id` arm of
+  `TaskListUpdateInput`, its serialisation and a jest test with the picker. Mark the picker on
+  `TASK_LIST_JOURNAL_NOT_FOUND` by `meta.field`.
+- *Phase 10 and ITER21-008 Phase 3:* the user's association writes publish `TaskListUpdated`
+  `{associated_journal_id: (null, id) | (id, other) | (id, null)}` with `source` `ui` or `mcp`.
+- *ITER21-007 Phase 8:* a create with an association should take the journal through the same
+  owner-scoped `FOR KEY SHARE` read before it writes the list.
 
 #### Phase 4: List page and `/tasks` card: associate and link
 

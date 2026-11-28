@@ -76,6 +76,14 @@ from app.mcp.shared.dependencies import (
 from app.shared.patch import UNSET, Unset
 
 
+def _cleared_or[T](value: T | None, *, clear: bool) -> T | None | Unset:
+    """A tool argument as the patch takes it: ``None`` when its clear flag is
+    set, the value when one was given, otherwise ``UNSET``."""
+    if clear:
+        return None
+    return value if value is not None else UNSET
+
+
 def _task_list_fields(task_list: TaskList) -> TaskListMCP:
     """The answer every list-returning tool gives."""
     if task_list.id is None or task_list.position is None:
@@ -89,6 +97,7 @@ def _task_list_fields(task_list: TaskList) -> TaskListMCP:
         archived_at=(
             task_list.archived_at.isoformat() if task_list.archived_at else None
         ),
+        associated_journal_id=task_list.associated_journal_id,
         created_at=task_list.created_at.isoformat() if task_list.created_at else None,
         updated_at=task_list.updated_at.isoformat() if task_list.updated_at else None,
     )
@@ -111,8 +120,9 @@ async def create_task_list(
     """
     Create a task list: a named home for tasks, added below the user's lists.
 
-    Lists can be created, renamed, given or cleared an icon, read, listed,
-    reordered, archived and unarchived. A new list is empty: put a task on it
+    Lists can be created, renamed, given or cleared an icon, associated with a
+    journal (update_task_list), read, listed, reordered, archived and
+    unarchived. A new list is empty: put a task on it
     with create_task and its task_list_id. A blank or overlong name is refused
     naming the field.
     """
@@ -151,39 +161,79 @@ async def update_task_list(
         JsonBool,
         Field(description="Remove the list's icon. Cannot be combined with icon."),
     ] = False,
+    associated_journal_id: Annotated[
+        Annotated[int, Field(ge=1, le=INT32_MAX), JsonIntOnly] | None,
+        Field(
+            description=(
+                "One of the user's journals to associate the list with, "
+                "replacing any it has. Omit to keep the current association."
+            )
+        ),
+    ] = None,
+    clear_associated_journal: Annotated[
+        JsonBool,
+        Field(
+            description=(
+                "Remove the list's journal association. Cannot be combined with "
+                "associated_journal_id."
+            )
+        ),
+    ] = False,
     db_connection: AsyncConnection = mcp_depends(get_async_connection),
     task_list_service: TaskListService = mcp_depends(get_task_list_service),
 ) -> TaskListMCP:
     """
-    Rename one of the user's task lists, change its icon, or remove its icon.
+    Rename one of the user's task lists, change or remove its icon, or
+    associate it with a journal, change that journal or remove the association.
 
     Only the arguments you supply are changed. To remove the icon pass
-    clear_icon=true rather than a null icon, since an omitted icon means "keep
-    it". Name at least one change; values the list already has change nothing.
+    clear_icon=true, and to remove the association clear_associated_journal=true,
+    rather than a null, since an omitted argument means "keep it". Name at least
+    one change; values the list already has change nothing.
+
+    A list is associated with at most one journal, and a journal can hold
+    several lists — a packing list for a trip, prep for a meeting. Any of the
+    user's journals can be chosen, past, future or cancelled; associating never
+    changes the dates of the list's tasks. A journal that does not exist or
+    belongs to someone else is refused as not found, naming
+    associated_journal_id.
+
     A blank or overlong name is refused naming the field, and a list that does
     not exist or belongs to someone else is reported as not found. An archived
     list is read-only: unarchive it first.
     """
-    # Argument shape, not a domain rule: the clear flag exists only because a
+    # Argument shape, not a domain rule: the clear flags exist only because a
     # tool cannot tell a null argument from an omitted one.
     if clear_icon and icon is not None:
         raise TaskListValidationError(
             "icon", "Pass either an icon or clear_icon=true, not both"
         )
-    if name is None and icon is None and not clear_icon:
+    if clear_associated_journal and associated_journal_id is not None:
         raise TaskListValidationError(
-            "name", "Name a change: a new name, a new icon, or clear_icon=true"
+            "associated_journal_id",
+            "Pass either an associated_journal_id or "
+            "clear_associated_journal=true, not both",
+        )
+    if (
+        name is None
+        and icon is None
+        and not clear_icon
+        and associated_journal_id is None
+        and not clear_associated_journal
+    ):
+        raise TaskListValidationError(
+            "name",
+            "Name a change: a new name, a new icon, clear_icon=true, an "
+            "associated_journal_id or clear_associated_journal=true",
         )
 
     user_id = await get_current_user_id()
-    icon_change: TaskIcon | None | Unset = UNSET
-    if clear_icon:
-        icon_change = None
-    elif icon is not None:
-        icon_change = icon
     patch = TaskListPatch(
         name=name if name is not None else UNSET,
-        icon=icon_change,
+        icon=_cleared_or(icon, clear=clear_icon),
+        associated_journal_id=_cleared_or(
+            associated_journal_id, clear=clear_associated_journal
+        ),
     )
     updated = await task_list_service.update_task_list(
         user_id=user_id,
@@ -570,11 +620,13 @@ async def get_task_list_history(
     changed or cleared (an empty side is no icon). ``archived_at`` records
     archiving and unarchiving: ``old_value`` empty and ``new_value`` an ISO
     instant is an **archive**; the instant moving to empty is an **unarchive**.
-    ``associated_journal_id`` is the journal the list is associated with: a
-    journal id moving to empty means the list was left unassociated, as a
-    journal delete does; one journal id moving to another means that journal
-    was merged into the other. Reordering lists is not recorded. Changes to the tasks on a list are in each
-    task's own history (``get_task_history``), not here.
+    ``associated_journal_id`` is the journal the list is associated with:
+    empty moving to a journal id is an association, one id moving to another a
+    change of journal, and an id moving to empty a removal — made by a user or
+    an assistant (see ``source``), or by a journal delete. A journal merge moves
+    it from the absorbed journal to the survivor. Reordering lists is not
+    recorded. Changes to the tasks on a list are in each task's own history
+    (``get_task_history``), not here.
 
     **History is written asynchronously**, a moment behind the change. If you
     change a list and read its history straight back, your change may not be

@@ -28,6 +28,9 @@ class TaskListMCP(BaseModel):
     archived_at: str | None = Field(
         description="ISO 8601 instant the list was archived, or null"
     )
+    associated_journal_id: int | None = Field(
+        description="The journal the list is associated with, or null"
+    )
     created_at: str | None = Field(description="ISO 8601 instant")
     updated_at: str | None = Field(description="ISO 8601 instant")
 

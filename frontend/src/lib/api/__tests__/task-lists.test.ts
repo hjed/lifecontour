@@ -60,6 +60,7 @@ function list(
       position: Number(id),
       archived: false,
       archived_at: null,
+      associated_journal_id: null,
       created_at: '2026-11-20T00:00:00Z',
       updated_at: '2026-11-20T00:00:00Z',
       ...attributes,

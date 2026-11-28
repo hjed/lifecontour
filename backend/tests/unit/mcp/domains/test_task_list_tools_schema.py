@@ -20,6 +20,7 @@ _LIST_FIELDS = {
     "position",
     "archived",
     "archived_at",
+    "associated_journal_id",
     "created_at",
     "updated_at",
 }
@@ -101,7 +102,14 @@ class TestTheInputsAreTyped:
         schema = (await _tools())["update_task_list"].input_schema
         properties = schema["properties"]
 
-        assert set(properties) == {"task_list_id", "name", "icon", "clear_icon"}
+        assert set(properties) == {
+            "task_list_id",
+            "name",
+            "icon",
+            "clear_icon",
+            "associated_journal_id",
+            "clear_associated_journal",
+        }
         assert schema["required"] == ["task_list_id"]
         assert _enum_values(schema, properties["icon"]) == [
             icon.value for icon in TaskIcon
@@ -112,6 +120,22 @@ class TestTheInputsAreTyped:
             properties["task_list_id"]["minimum"],
             properties["task_list_id"]["maximum"],
         ) == (1, INT32_MAX)
+
+    async def test_update_takes_a_bounded_journal_id_and_a_clear_flag(self) -> None:
+        properties = (await _tools())["update_task_list"].input_schema["properties"]
+
+        [journal_id] = [
+            option
+            for option in properties["associated_journal_id"]["anyOf"]
+            if option.get("type") != "null"
+        ]
+        assert (journal_id["type"], journal_id["minimum"], journal_id["maximum"]) == (
+            "integer",
+            1,
+            INT32_MAX,
+        )
+        clear = properties["clear_associated_journal"]
+        assert (clear["type"], clear["default"]) == ("boolean", False)
 
     async def test_get_takes_only_the_list_id(self) -> None:
         schema = (await _tools())["get_task_list"].input_schema
