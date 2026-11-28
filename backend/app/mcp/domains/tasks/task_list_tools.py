@@ -26,6 +26,7 @@ from core_shared.models.tasks import (
     TaskList,
     TaskListArchiveFilter,
     TaskListListing,
+    TaskListPageWindow,
     TaskListValidationError,
 )
 from fastmcp.tools import tool
@@ -234,20 +235,67 @@ async def list_task_lists(
             )
         ),
     ] = TaskListArchiveFilter.ACTIVE,
+    name: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Only lists whose name contains this, ignoring case. % and _ "
+                "match themselves. Omit for every list."
+            )
+        ),
+    ] = None,
+    paged: Annotated[
+        JsonBool,
+        Field(
+            description=(
+                "Cut the answer to page and limit. By default every matching "
+                "list is returned."
+            )
+        ),
+    ] = False,
+    page: Annotated[
+        int,
+        Field(description="Page number (1-based), when paged", ge=1, le=INT32_MAX),
+        JsonIntOnly,
+    ] = 1,
+    limit: Annotated[
+        int,
+        Field(description="Lists per page, when paged", ge=1, le=100),
+        JsonIntOnly,
+    ] = 20,
     task_list_read_service: TaskListReadService = mcp_depends(
         get_task_list_read_service
     ),
 ) -> TaskListSummariesMCP:
     """
-    List the user's task lists, filtered by archived state.
+    List the user's task lists, filtered by archived state and, optionally, name.
 
     Use this to find a list's id by its name before reading it. With no
     argument it returns the lists the user is working with, in their order.
     Each list carries open_task_count: how many of its tasks are not done.
+
+    **Finding a list by name.** ``name`` keeps the lists whose name contains it,
+    ignoring case; a blank name, or one longer than a list name can be, is
+    refused. Archived lists are found with ``archived='archived'``.
+
+    **Paging.** Every matching list comes back unless ``paged`` is true; then
+    ``page`` and ``limit`` (1–100, default 20) cut the answer. ``total_count``
+    always says how many lists match across every page; step ``page`` until
+    it is covered. A page past the end comes back empty and still reports the
+    total.
     """
     user_id = await get_current_user_id()
     listed = await task_list_read_service.list_task_lists(
-        user_id=user_id, listing=TaskListListing(archived=archived)
+        user_id=user_id,
+        listing=TaskListListing(
+            archived=archived,
+            name_contains=name,
+            page=(
+                TaskListPageWindow(limit=limit, offset=(page - 1) * limit)
+                if paged
+                else None
+            ),
+        ),
     )
     return TaskListSummariesMCP(
         lists=[
@@ -256,7 +304,9 @@ async def list_task_lists(
                 open_task_count=each.open_task_count,
             )
             for each in listed.summaries
-        ]
+        ],
+        total_count=listed.total,
+        paged=paged,
     )
 
 

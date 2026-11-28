@@ -73,9 +73,18 @@ class TaskListSummaryMCP(TaskListMCP):
 
 
 class TaskListSummariesMCP(BaseModel):
-    """The user's task lists for one archived filter, each with its count."""
+    """The user's task lists for one listing, each with its count."""
 
     lists: list[TaskListSummaryMCP]
+    total_count: int = Field(
+        description="How many lists the listing matches, across every page"
+    )
+    paged: bool = Field(
+        description=(
+            "Whether lists was cut to page and limit. When false every "
+            "matching list is here."
+        )
+    )
 
 
 class OpenTaskListTasksMCP(BaseModel):

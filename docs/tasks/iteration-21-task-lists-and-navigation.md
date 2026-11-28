@@ -3329,16 +3329,75 @@ picker's own behaviour, so they need only test it in context.
 - [ ] Collapsed, paged, cancelled marked; reopen.
 - [ ] E2E: find under Completed.
 
-#### Phase 12: Archived listing: paging and name filter 🚧 IN PROGRESS
+#### Phase 12: Archived listing: paging and name filter ✅ DONE
 
-**Status:** 🚧 IN PROGRESS — delivered as a native stack of two PRs (user decision), each mergeable alone: (1) the listing value, repository filter and paging, and the read service; (2) the REST and MCP parameters with the frontend client hook.
+**Status:** ✅ DONE — delivered as a native stack of two PRs (user decision), each mergeable alone: (1) the listing value, repository filter and paging, and the read service; (2) the REST and MCP parameters with the frontend client hook.
 **Prerequisites:** ITER21-001.
-**Estimated diff:** ~80 production → **~700 tracked** · one capability on REST and MCP together
+**Estimated diff:** ~80 production → **~700 tracked** · one capability on REST and MCP together · **Actual:** ~530 production → **~1,300 tracked**
+(excluding this document). Layer 1: 630 (516 insertions, 114 deletions: 264 production, 366 tests).
+Layer 2: 664 (638 insertions, 26 deletions: 265 production — REST 90, MCP 67, frontend client 108 —
+397 tests, 2 architecture docs). Tracked lines ran ×1.9 over the estimate, production ×6.5: the
+estimate priced the SQL alone, and the phase also carried a new listing value, both surfaces' answer
+shapes and the frontend client hook (ITER21-002 Phase 1's note), each with its own tests.
 
 **Acceptance Criteria:**
 
-- [ ] Extends the list-all endpoint and tool.
-- [ ] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+- [x] Extends the list-all endpoint and tool.
+- [x] The REST endpoint and the MCP tool ship together, each with its own rejection and second-user isolation tests.
+
+**Delivered:**
+- `core_shared.models.tasks`: `TaskListListing` (archived filter, `name_contains` — trimmed; blank or
+  over `MAX_TASK_LIST_NAME_LENGTH` raises `TaskListValidationError(field="name")` — and an optional
+  `TaskListPageWindow(limit, offset)`), `TaskListPage` and `TaskListSummaryPage` (each with `total`).
+- `TaskListRepository.list_for_user(user_id, listing) -> TaskListPage`: one statement composed from the
+  archive clause, an optional `ILIKE … ESCAPE '\'` name clause (`%`, `_`, `\` literal) and the
+  filter's order, with `LIMIT/OFFSET` and a separate `COUNT(*)` only when paged; unpaged is one
+  statement and `total == len`. `TaskListReadService.list_task_lists(user_id, listing)` counts open
+  tasks for the page's ids only. The move answer reads an unpaged `ACTIVE` listing.
+- REST `GET /api/task-lists`: `?name=`, and `?page=` / `?limit=` (1–100, default 20) — either one pages
+  the answer as `TaskListSummaryPageResponse` (`data`, pagination `meta`, `links` that keep `archived`
+  and `name`); without them the answer is `{data}` exactly as before.
+- MCP `list_task_lists`: `name`, `paged` (default false), `page` (1), `limit` (20) — the
+  `list_task_list_tasks` shape; the answer gains `total_count` and `paged`.
+- Frontend: `TaskListsPageResponse`; `TaskListListingParams.name` (honoured by `useTaskLists`);
+  `taskListKeys.archivedPages({name, limit})` under `listings()`; `useArchivedTaskLists({name, limit})`
+  (infinite, `ARCHIVED_LISTS_PAGE_SIZE` 20, a blank name left out).
+- `api-design.md` *Task List Endpoints*: the listing row.
+
+**Tests:** unit `tests/unit/tasks/test_task_list_listing.py` (trim, blank, bound), `test_task_list_read_service.py`
+(page total, counts for the page only, empty page), `tests/unit/mcp/domains/test_task_list_tools_schema.py`
+(the new arguments and answer fields); integration `test_task_list_repository_integration.py`
+(`TestListingByName`: substring ignoring case, literal wildcards, each archived filter in its order;
+`TestListingInPages`: archived order across an `archived_at` tie, active order, filtered total, a page past
+the end, unpaged in one statement, a second user neither listed nor counted),
+`tests/integration/api/test_task_list_endpoints.py` (`TestListTaskListsByNameInPages`: filtered page with
+`meta`/`links`, unpaged has no `meta`, out-of-range `page`/`limit`, blank and over-long name naming the
+field, second-user isolation) and `tests/integration/mcp/test_task_list_tools_mcp.py`
+(`TestListTaskListsByNameInPagesTool`: the same); Jest `src/lib/api/__tests__/task-lists.test.ts`
+(`useArchivedTaskLists` URL, trimmed/encoded/blank name, paging, keys and refresh; `useTaskLists` name).
+No E2E: no UI.
+
+**Decisions (recorded during implementation):**
+- **Paging is opt-in** so the sidebar, overview and move answer keep every list. REST pages when `page` or
+  `limit` is given; MCP takes a `paged` flag, as `list_task_list_tasks` does.
+- **No `archived_at` index** (ITER21-001 Phase 2's note): every query is bounded to one owner by
+  `ix_task_lists_user_id_position`, and a substring `ILIKE` cannot use a b-tree.
+- **The name rule lives in `TaskListListing`**, so both surfaces refuse with `TASK_VALIDATION_ERROR`
+  (field `name`); the MCP schema publishes no `maxLength`, leaving the domain the one rule.
+- **The LIKE escape stays private to the task-list adapter**; reusing it in
+  `journal_event_link_repository.py` would cross into the integrations domain.
+- **The move cancels only the exact active listing** (`exact: true`): `useTaskLists` can now hold a
+  name-filtered active listing, which a partial key match would have cancelled mid-flight and never
+  re-read (found in review, pinned by a Jest test).
+- **Two PRs rather than one** (user decision): layer 1 adapts REST and MCP to the new service answer with
+  no behaviour change, so it merges alone.
+
+**Notes for later phases:**
+- *Phase 13:* use `useArchivedTaskLists({ name })` — `fetchNextPage`/`hasNextPage` for *Show more*,
+  `pages.flatMap(page => page.data)` for the rows, already most recently archived first, so month groups
+  follow from `attributes.archived_at` in the user's timezone. Debounce the filter input; the hook trims
+  and omits a blank name. Archive, unarchive and delete invalidate `listings()`, which refreshes it. The
+  client work Phase 13's estimate assumed is done here; its UI-priced ~950 estimate is otherwise unchanged.
 
 #### Phase 13: Archived lists page
 

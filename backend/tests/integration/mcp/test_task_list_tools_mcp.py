@@ -597,6 +597,106 @@ class TestListTaskListsTool:
         assert "archived" in response.text
 
 
+class TestListTaskListsByNameInPagesTool:
+    """The archived page's listing over MCP: a name filter and pages.
+
+    The filter and paging rules are the repository's and are proven there;
+    these hold the tool to its result, its refusals and its owner.
+    """
+
+    async def test_a_filtered_page_answers_the_slice_with_the_total(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        for name, archived_at in (
+            ("Pack 1", ARCHIVED_AT - timedelta(days=30)),
+            ("Pack 2", ARCHIVED_AT),
+            ("Groceries", ARCHIVED_AT),
+            ("Pack 3", ARCHIVED_AT + timedelta(days=10)),
+        ):
+            await seed_task_list(clean_database, name, archived_at=archived_at)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client,
+                "list_task_lists",
+                archived="archived",
+                name="PACK",
+                paged=True,
+                page=2,
+                limit=2,
+            )
+
+        assert _names(result) == ["Pack 1"]
+        assert (result["total_count"], result["paged"]) == (3, True)
+
+    async def test_unpaged_it_answers_every_match_and_says_so(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        for name in ("Pack 1", "Pack 2", "Pack 3"):
+            await seed_task_list(clean_database, name)
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(client, "list_task_lists", name="pack", limit=1)
+
+        assert _names(result) == ["Pack 1", "Pack 2", "Pack 3"]
+        assert (result["total_count"], result["paged"]) == (3, False)
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            pytest.param({"paged": True, "page": 0}, id="page-zero"),
+            pytest.param({"paged": True, "limit": 0}, id="limit-zero"),
+            pytest.param({"paged": True, "limit": 101}, id="limit-over-100"),
+        ],
+    )
+    async def test_an_out_of_range_page_or_limit_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        arguments: dict[str, Any],
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            response = await _raw_call(client, "list_task_lists", arguments)
+
+        assert '"isError":true' in response.text
+
+    @pytest.mark.parametrize("name", ["   ", "x" * (MAX_TASK_LIST_NAME_LENGTH + 1)])
+    async def test_a_blank_or_too_long_name_filter_is_refused(
+        self,
+        authenticated_lifespan_client: Any,
+        clean_database: AsyncConnection,
+        name: str,
+    ) -> None:
+        async with authenticated_lifespan_client() as client:
+            refusal = await _refused(client, "list_task_lists", name=name)
+
+        assert refusal["error"] == "Task error"
+        assert refusal["message"].startswith("name: A name filter")
+
+    async def test_another_users_matching_lists_are_neither_listed_nor_counted(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        await seed_task_list(clean_database, "Pack mine", archived_at=ARCHIVED_AT)
+        await seed_task_list(
+            clean_database,
+            "Pack theirs",
+            user_id=OTHER_USER_ID,
+            archived_at=ARCHIVED_AT,
+        )
+
+        async with authenticated_lifespan_client() as client:
+            result = await _call(
+                client,
+                "list_task_lists",
+                archived="archived",
+                name="pack",
+                paged=True,
+            )
+
+        assert _names(result) == ["Pack mine"]
+        assert result["total_count"] == 1
+
+
 _COUNT_OUTBOX = "SELECT COUNT(*) FROM outbox_events"
 
 

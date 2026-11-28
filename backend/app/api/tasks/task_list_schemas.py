@@ -21,6 +21,7 @@ from app.api.common.schemas import (
     JsonApiCollectionResponse,
     JsonApiCreateRequest,
     JsonApiLinks,
+    JsonApiMeta,
     JsonApiResponse,
     JsonApiUpdateRequest,
 )
@@ -244,11 +245,19 @@ class TaskListSummaryResource(BaseModel):
 
 
 class TaskListSummaryCollectionResponse(BaseModel):
-    """The user's task lists, each with its open-task count; unpaginated."""
+    """The user's task lists, each with its open-task count: every list the
+    listing matches, when no page was asked for."""
 
     data: list[TaskListSummaryResource] = Field(
         ..., description="The lists, in the order the filter defines"
     )
+
+
+class TaskListSummaryPageResponse(TaskListSummaryCollectionResponse):
+    """One page of the user's task lists, each with its open-task count."""
+
+    meta: JsonApiMeta = Field(..., description="Pagination metadata")
+    links: JsonApiLinks = Field(..., description="Pagination links")
 
 
 def task_list_self_link(task_list_id: int, base_url: str = "") -> str:

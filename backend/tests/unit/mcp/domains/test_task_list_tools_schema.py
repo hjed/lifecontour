@@ -73,6 +73,30 @@ class TestTheInputsAreTyped:
         ]
         assert "required" not in schema or schema["required"] == []
 
+    async def test_list_takes_a_bounded_name_filter_and_opt_in_paging(self) -> None:
+        schema = (await _tools())["list_task_lists"].input_schema
+        properties = schema["properties"]
+
+        assert set(properties) == {"archived", "name", "paged", "page", "limit"}
+        assert [option["type"] for option in properties["name"]["anyOf"]] == [
+            "string",
+            "null",
+        ]
+        assert properties["paged"]["type"] == "boolean"
+        assert properties["paged"]["default"] is False
+        assert (properties["page"]["minimum"], properties["page"]["maximum"]) == (
+            1,
+            INT32_MAX,
+        )
+        assert (properties["limit"]["minimum"], properties["limit"]["maximum"]) == (
+            1,
+            100,
+        )
+        assert (properties["page"]["default"], properties["limit"]["default"]) == (
+            1,
+            20,
+        )
+
     async def test_update_offers_the_fixed_icon_set_and_a_clear_flag(self) -> None:
         schema = (await _tools())["update_task_list"].input_schema
         properties = schema["properties"]
@@ -195,7 +219,9 @@ class TestTheResultShapeIsPublished:
         schema = (await _tools())["list_task_lists"].output_schema
 
         assert schema is not None, "list_task_lists publishes no outputSchema"
-        assert set(schema["properties"]) == {"lists"}
+        assert set(schema["properties"]) == {"lists", "total_count", "paged"}
+        assert schema["properties"]["total_count"]["type"] == "integer"
+        assert schema["properties"]["paged"]["type"] == "boolean"
         item = _item(schema, schema["properties"]["lists"]["items"])
         assert set(item["properties"]) == _LIST_FIELDS | {"open_task_count"}
         assert item["properties"]["open_task_count"]["type"] == "integer"

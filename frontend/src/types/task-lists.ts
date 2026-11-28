@@ -8,6 +8,7 @@
  */
 
 import type { JsonApiLinks } from './api';
+import type { HistoryPaginationMeta } from './history';
 import type { TaskIcon } from './task-icons';
 
 /** Which of a user's lists the listing answers. Values must match the backend `TaskListArchiveFilter`. */
@@ -53,9 +54,20 @@ export interface TaskListResponse {
   data: TaskListResource;
 }
 
-/** What `GET /api/task-lists` answers with. Unpaginated: lists are a sidebar-sized set. */
+/** What `GET /api/task-lists` answers with when no page is asked for: every matching list. */
 export interface TaskListsResponse {
   data: TaskListSummaryResource[];
+}
+
+/**
+ * One page of `GET /api/task-lists`, asked for with `page` and `limit`. Page
+ * by number from `meta`: the backend's `links` are absolute, built from its
+ * own base URL.
+ */
+export interface TaskListsPageResponse {
+  data: TaskListSummaryResource[];
+  meta: HistoryPaginationMeta;
+  links?: JsonApiLinks | null;
 }
 
 /**
