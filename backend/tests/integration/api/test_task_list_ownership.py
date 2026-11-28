@@ -23,9 +23,14 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.infrastructure.config import Settings
 from app.main import create_app
-from tests.integration.tasks.task_seeding import OTHER_USER_ID, seed_task_list
+from tests.integration.tasks.task_seeding import (
+    OTHER_USER_ID,
+    create_journal,
+    seed_task_list,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -160,6 +165,32 @@ class TestTaskListOwnershipIsEnforced:
         )
         assert response.json()["errors"][0]["code"] == "TASK_LIST_NOT_FOUND"
         assert OTHER_NAME not in response.text
+        assert await _snapshot(async_connection, foreign_list_id) == before
+
+    async def test_your_journal_cannot_be_associated_with_their_list(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        foreign_list_id: int,
+    ) -> None:
+        """A journal you own is no key to somebody else's list: the list is
+        refused as absent before the journal is considered."""
+        yours = await create_journal(SqlJournalRepository(async_connection))
+        before = await _snapshot(async_connection, foreign_list_id)
+
+        response = await authenticated_client.patch(
+            LIST_ROUTE.format(list_id=foreign_list_id),
+            json={
+                "data": {
+                    "type": "task-lists",
+                    "id": str(foreign_list_id),
+                    "attributes": {"associated_journal_id": yours},
+                }
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.json()["errors"][0]["code"] == "TASK_LIST_NOT_FOUND"
         assert await _snapshot(async_connection, foreign_list_id) == before
 
 

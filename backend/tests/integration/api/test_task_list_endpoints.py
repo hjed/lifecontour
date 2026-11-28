@@ -19,12 +19,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.api.common.identifiers import INT32_MAX
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.infrastructure.config import Settings
 from app.main import create_app
 from tests.integration.tasks.task_seeding import (
     OTHER_USER_ID,
     USER_ID,
     count,
+    create_journal,
     create_list_task,
     seed_task_list,
     task_exists,
@@ -76,6 +78,7 @@ class TestCreateTaskListEndpoint:
             "position": 0,
             "archived": False,
             "archived_at": None,
+            "associated_journal_id": None,
             "created_at": data["attributes"]["created_at"],
             "updated_at": data["attributes"]["updated_at"],
         }
@@ -439,6 +442,128 @@ class TestUpdateTaskListEndpoint:
         assert error["code"] == "TASK_LIST_ARCHIVED"
         assert "unarchive" in str(error["detail"])
         assert await _row(async_connection, archived.id or 0) == before
+        assert await task_list_events(async_connection) == []
+
+
+async def _journal(conn: AsyncConnection, *, user_id: str = USER_ID) -> int:
+    return await create_journal(
+        SqlJournalRepository(conn), title="Trip", days_offset=7, user_id=user_id
+    )
+
+
+class TestAssociateTaskListEndpoint:
+    """``associated_journal_id`` on ``PATCH /api/task-lists/{list_id}``.
+
+    The service rule is proven in ``test_task_list_service_integration.py``;
+    here, the REST shape of each answer and refusal.
+    """
+
+    async def test_associates_changes_and_removes_and_each_read_carries_it(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        first = await _journal(async_connection)
+        second = await _journal(async_connection)
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        answered = []
+        for journal_id in (first, second, None):
+            response = await authenticated_client.patch(
+                f"/api/task-lists/{seeded.id}",
+                json=_patch_body(seeded.id, associated_journal_id=journal_id),
+            )
+            assert response.status_code == 200
+            answered.append(
+                response.json()["data"]["attributes"]["associated_journal_id"]
+            )
+
+        assert answered == [first, second, None]
+        events = await task_list_events(async_connection, task_list_id=seeded.id)
+        assert [event.payload["changed_fields"] for event in events] == [
+            {"associated_journal_id": [None, first]},
+            {"associated_journal_id": [first, second]},
+            {"associated_journal_id": [second, None]},
+        ]
+        assert {(e.payload["source"], e.payload["changed_by"]) for e in events} == {
+            ("ui", "ui")
+        }
+
+    async def test_the_read_and_the_listing_carry_the_journal(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await _journal(async_connection)
+        seeded = await seed_task_list(
+            async_connection, "Packing", associated_journal_id=journal_id
+        )
+
+        read = await authenticated_client.get(f"/api/task-lists/{seeded.id}")
+        listing = await authenticated_client.get("/api/task-lists")
+
+        assert read.json()["data"]["attributes"]["associated_journal_id"] == journal_id
+        assert [
+            resource["attributes"]["associated_journal_id"]
+            for resource in listing.json()["data"]
+        ] == [journal_id]
+
+    async def test_another_users_journal_is_answered_as_a_missing_one(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        theirs = await _journal(async_connection, user_id=OTHER_USER_ID)
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+        missing = theirs + 1_000_000
+
+        foreign = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}",
+            json=_patch_body(seeded.id, associated_journal_id=theirs),
+        )
+        unknown = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}",
+            json=_patch_body(seeded.id, associated_journal_id=missing),
+        )
+
+        assert (foreign.status_code, unknown.status_code) == (404, 404)
+        foreign_error, unknown_error = _error(foreign.json()), _error(unknown.json())
+        assert foreign_error["code"] == "TASK_LIST_JOURNAL_NOT_FOUND"
+        assert foreign_error["meta"] == {"field": "associated_journal_id"}
+        assert foreign_error["detail"] == str(unknown_error["detail"]).replace(
+            str(missing), str(theirs)
+        )
+        assert (await _row(async_connection, seeded.id))[
+            "associated_journal_id"
+        ] is None
+        assert await task_list_events(async_connection) == []
+
+    async def test_an_archived_list_refuses_an_association_with_a_conflict(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await _journal(async_connection)
+        archived = await seed_task_list(
+            async_connection, "Old trip", archived_at=ARCHIVED_AT
+        )
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{archived.id}",
+            json=_patch_body(archived.id, associated_journal_id=journal_id),
+        )
+
+        assert response.status_code == 409
+        assert _error(response.json())["code"] == "TASK_LIST_ARCHIVED"
+
+    @pytest.mark.parametrize("journal_id", ["12", 0, True], ids=repr)
+    async def test_a_journal_id_that_is_not_a_positive_integer_is_refused(
+        self,
+        authenticated_client: AsyncClient,
+        async_connection: AsyncConnection,
+        journal_id: object,
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+
+        response = await authenticated_client.patch(
+            f"/api/task-lists/{seeded.id}",
+            json=_patch_body(seeded.id, associated_journal_id=journal_id),
+        )
+
+        assert response.status_code == 400
         assert await task_list_events(async_connection) == []
 
 

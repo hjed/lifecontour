@@ -26,6 +26,8 @@ export interface TaskListAttributes {
   archived: boolean;
   /** When it was first archived (ISO instant); `null` while active. */
   archived_at: string | null;
+  /** The one journal the list is associated with; `null` when it has none. */
+  associated_journal_id: number | null;
   created_at: string | null;
   updated_at: string | null;
 }

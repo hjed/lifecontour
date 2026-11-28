@@ -11,10 +11,10 @@ frontend icon picker takes the keys from there rather than a hand copy.
 """
 
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from core_shared.models.tasks import TaskIcon, TaskList, TaskListSummary
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 from app.api.common.identifiers import INT32_MAX
 from app.api.common.schemas import (
@@ -48,6 +48,10 @@ class TaskListAttributes(BaseModel):
     )
     archived_at: datetime | None = Field(
         default=None, description="When the list was archived, or null"
+    )
+    associated_journal_id: int | None = Field(
+        default=None,
+        description="The journal the list is associated with, or null",
     )
     created_at: datetime | None = Field(default=None, description="Creation time")
     updated_at: datetime | None = Field(default=None, description="Last update time")
@@ -111,11 +115,13 @@ class TaskListCreateRequest(JsonApiCreateRequest[TaskListCreateData]):
 
 
 class TaskListUpdateAttributes(BaseModel):
-    """Attributes a client may send to update a task list: its name, its icon.
+    """Attributes a client may send to update a task list: its name, its icon,
+    the journal it is associated with.
 
-    JSON:API sends the attributes that changed, so both are optional — but the
-    two differ on ``null``. ``"icon": null`` **clears** the icon, while leaving
-    ``icon`` out leaves it alone; the controller tells them apart with
+    JSON:API sends the attributes that changed, so all are optional — but they
+    differ on ``null``. ``"icon": null`` **clears** the icon and
+    ``"associated_journal_id": null`` removes the association, while leaving
+    either out leaves it alone; :meth:`to_patch` tells them apart with
     ``model_fields_set``. A list must have a name, so ``"name": null`` is
     refused rather than read as "not sent".
 
@@ -138,13 +144,29 @@ class TaskListUpdateAttributes(BaseModel):
             "leave it unchanged."
         ),
     )
+    # Strict, as the task's due journal is: a string or a boolean is a client
+    # bug, and coercing one would associate a journal nobody named.
+    associated_journal_id: Annotated[StrictInt, Field(ge=1, le=INT32_MAX)] | None = (
+        Field(
+            default=None,
+            description=(
+                "One of your journals to associate the list with, replacing any "
+                "it has, or null to remove the association. Any of your journals "
+                "may be chosen, past, future or cancelled; the list's tasks keep "
+                "their own dates. Omit to leave it unchanged."
+            ),
+        )
+    )
 
     @model_validator(mode="after")
     def _must_name_a_change(self) -> Self:
         if "name" in self.model_fields_set and self.name is None:
             raise ValueError("'name' cannot be null: a task list must have a name.")
         if not self.model_fields_set:
-            raise ValueError("An update must name at least one of 'name' or 'icon'.")
+            raise ValueError(
+                "An update must name at least one of 'name', 'icon' or "
+                "'associated_journal_id'."
+            )
         return self
 
     def to_patch(self) -> TaskListPatch:
@@ -152,6 +174,11 @@ class TaskListUpdateAttributes(BaseModel):
         return TaskListPatch(
             name=self.name if self.name is not None else UNSET,
             icon=self.icon if "icon" in self.model_fields_set else UNSET,
+            associated_journal_id=(
+                self.associated_journal_id
+                if "associated_journal_id" in self.model_fields_set
+                else UNSET
+            ),
         )
 
 
@@ -282,6 +309,7 @@ def to_task_list_resource(task_list: TaskList, base_url: str = "") -> TaskListRe
             position=task_list.position,
             archived=task_list.is_archived,
             archived_at=task_list.archived_at,
+            associated_journal_id=task_list.associated_journal_id,
             created_at=task_list.created_at,
             updated_at=task_list.updated_at,
         ),

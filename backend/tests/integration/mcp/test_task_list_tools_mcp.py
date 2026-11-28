@@ -92,6 +92,7 @@ class TestCreateTaskListTool:
             "position": 0,
             "archived": False,
             "archived_at": None,
+            "associated_journal_id": None,
             "created_at": created["created_at"],
             "updated_at": created["updated_at"],
         }
@@ -335,6 +336,150 @@ class TestUpdateTaskListTool:
         assert "archived" in refused["message"]
         assert "unarchive" in refused["message"]
         assert await _row(clean_database, archived.id) == before
+        assert await task_list_events(clean_database) == []
+
+
+async def _journal(conn: AsyncConnection, *, user_id: str = USER_ID) -> int:
+    return await create_journal(
+        SqlJournalRepository(conn), title="Trip", days_offset=7, user_id=user_id
+    )
+
+
+class TestAssociateTaskListTool:
+    """``associated_journal_id`` and ``clear_associated_journal`` on
+    ``update_task_list``. The service rule is proven in
+    ``test_task_list_service_integration.py``; here, what an agent sees."""
+
+    async def test_associates_changes_and_removes_attributed_to_the_assistant(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        first = await _journal(clean_database)
+        second = await _journal(clean_database)
+        seeded = await seed_task_list(clean_database, "Packing")
+
+        async with authenticated_lifespan_client() as client:
+            answers = [
+                await _call(
+                    client,
+                    "update_task_list",
+                    task_list_id=seeded.id,
+                    associated_journal_id=first,
+                ),
+                await _call(
+                    client,
+                    "update_task_list",
+                    task_list_id=seeded.id,
+                    associated_journal_id=second,
+                ),
+                await _call(
+                    client,
+                    "update_task_list",
+                    task_list_id=seeded.id,
+                    clear_associated_journal=True,
+                ),
+            ]
+
+        assert [answer["associated_journal_id"] for answer in answers] == [
+            first,
+            second,
+            None,
+        ]
+        events = await task_list_events(clean_database, task_list_id=seeded.id)
+        assert [event.payload["changed_fields"] for event in events] == [
+            {"associated_journal_id": [None, first]},
+            {"associated_journal_id": [first, second]},
+            {"associated_journal_id": [second, None]},
+        ]
+        assert {(e.payload["source"], e.payload["changed_by"]) for e in events} == {
+            ("mcp", "mcp")
+        }
+
+    async def test_a_journal_and_its_clear_flag_together_are_refused(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await _journal(clean_database)
+        seeded = await seed_task_list(clean_database, "Packing")
+
+        async with authenticated_lifespan_client() as client:
+            refusal = await _refused(
+                client,
+                "update_task_list",
+                task_list_id=seeded.id,
+                associated_journal_id=journal_id,
+                clear_associated_journal=True,
+            )
+
+        assert refusal["error"] == "Task error"
+        assert "associated_journal_id" in refusal["message"]
+        assert await task_list_events(clean_database) == []
+
+    async def test_another_users_journal_is_refused_as_a_missing_one(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        theirs = await _journal(clean_database, user_id=OTHER_USER_ID)
+        seeded = await seed_task_list(clean_database, "Packing")
+        assert seeded.id is not None
+        missing = theirs + 1_000_000
+
+        async with authenticated_lifespan_client() as client:
+            foreign = await _refused(
+                client,
+                "update_task_list",
+                task_list_id=seeded.id,
+                associated_journal_id=theirs,
+            )
+            unknown = await _refused(
+                client,
+                "update_task_list",
+                task_list_id=seeded.id,
+                associated_journal_id=missing,
+            )
+
+        assert foreign["error"] == unknown["error"] == "Not found"
+        assert foreign["message"] == unknown["message"].replace(
+            str(missing), str(theirs)
+        )
+        assert "associated_journal_id" in str(foreign)
+        assert (await _row(clean_database, seeded.id))["associated_journal_id"] is None
+        assert await task_list_events(clean_database) == []
+
+    async def test_your_journal_cannot_be_associated_with_their_list(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        yours = await _journal(clean_database)
+        foreign = await seed_task_list(clean_database, "Theirs", user_id=OTHER_USER_ID)
+        assert foreign.id is not None
+        before = await _row(clean_database, foreign.id)
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client,
+                "update_task_list",
+                task_list_id=foreign.id,
+                associated_journal_id=yours,
+            )
+
+        assert refused["error"] == "Not found"
+        assert f"Task list with ID {foreign.id} not found" in refused["message"]
+        assert await _row(clean_database, foreign.id) == before
+
+    async def test_an_archived_list_refuses_an_association(
+        self, authenticated_lifespan_client: Any, clean_database: AsyncConnection
+    ) -> None:
+        journal_id = await _journal(clean_database)
+        archived = await seed_task_list(
+            clean_database, "Old trip", archived_at=ARCHIVED_AT
+        )
+
+        async with authenticated_lifespan_client() as client:
+            refused = await _refused(
+                client,
+                "update_task_list",
+                task_list_id=archived.id,
+                associated_journal_id=journal_id,
+            )
+
+        assert "unarchive" in refused["message"]
         assert await task_list_events(clean_database) == []
 
 

@@ -226,8 +226,10 @@ async def get_task_list_history(
     changed or cleared), ``archived_at`` — an archive moves it from null to
     the instant, an unarchive from the instant back to null — and
     ``associated_journal_id``, the associated journal's id (null when
-    unassociated, as a journal delete leaves the list; a journal merge moves
-    it from the absorbed journal to the survivor). Each carries its
+    unassociated): associating moves it from null to the journal, changing
+    from one journal to another and removing it back to null, as a journal
+    delete also leaves the list; a journal merge moves it from the absorbed
+    journal to the survivor. Each carries its
     provenance and actor, in the shape the task and journal feeds use. Wording
     belongs to the client; these field names are the contract.
 
@@ -352,17 +354,26 @@ async def update_task_list(
     connection: FromDishka[AsyncConnection],
     user: FromDishka[SessionUser],  # Require authentication
 ) -> TaskListResponse:
-    """Rename one of your task lists, set or clear its icon, or both at once.
+    """Rename one of your task lists, set or clear its icon, associate it
+    with one of your journals or change or remove that association — any of
+    them at once.
 
-    ``"icon": null`` clears the icon; an absent ``icon`` leaves it alone. Both
-    attributes arriving are one change, applied under one locked read and one
-    write. Values the list already has change nothing and record nothing.
+    ``"icon": null`` clears the icon and ``"associated_journal_id": null``
+    removes the association; an absent attribute leaves it alone. Every
+    attribute arriving is one change, applied under one locked read and one
+    write. Values the list already has change nothing and record nothing. A
+    list holds at most one journal and a journal any number of lists;
+    associating never changes the dates of the list's tasks.
 
     Raises:
-        400: A blank, too-long or null name, an icon outside the fixed set, an
-             unknown attribute, a body naming no change, another resource type,
-             or a body id that disagrees with the path.
-        404: No such list, or it is not yours — indistinguishably.
+        400: A blank, too-long or null name, an icon outside the fixed set, a
+             journal id that is not a positive integer, an unknown attribute,
+             a body naming no change, another resource type, or a body id that
+             disagrees with the path.
+        404: No such list, or it is not yours — indistinguishably
+             (``TASK_LIST_NOT_FOUND``); or the journal does not exist or is not
+             yours, again indistinguishably (``TASK_LIST_JOURNAL_NOT_FOUND``,
+             ``meta.field`` = ``associated_journal_id``).
         409: The list is archived, and read-only until unarchived.
     """
     # A transport concern — which of two places names the resource — so it
