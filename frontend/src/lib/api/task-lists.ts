@@ -17,6 +17,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type Query,
   type QueryClient,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -85,6 +86,21 @@ export const TASK_LIST_CHANGED = 'TASK_LIST_CHANGED';
 export const TASK_LIST_MOVE_KEY = ['task-list-move'] as const;
 
 const ACTIVE_LISTING = taskListKeys.listing({ archived: 'active' });
+
+/**
+ * A name-filtered `active` listing: in the manual order, like the active
+ * listing, but never patched by a move, so a move re-reads it.
+ */
+function isNamedActiveListing({ queryKey }: Query): boolean {
+  const params = queryKey[2];
+  return (
+    typeof params === 'object' &&
+    params !== null &&
+    'archived' in params &&
+    params.archived === 'active' &&
+    'name' in params
+  );
+}
 
 // API Functions
 
@@ -587,9 +603,10 @@ function applyMoveAnswer(
  * - The listing is re-read too when the answer names other lists than the
  *   cache (one created elsewhere), or when a move cancelled a refresh that was
  *   already in flight.
- * - The `all` listing shares the manual order, and every list's `position`
- *   changed, so both are re-read. The archived listing is ordered by when lists
- *   were archived, so it is left alone.
+ * - Every other listing in the manual order is re-read: `all`, and the
+ *   name-filtered `active` and `all` listings, whose order and `position`s the
+ *   move changed. The archived listings are ordered by when lists were
+ *   archived, so they are left alone.
  */
 export function useMoveTaskList() {
   const queryClient = useQueryClient();
@@ -646,6 +663,7 @@ export function useMoveTaskList() {
         queryClient,
         { queryKey: taskListKeys.listing({ archived: 'all' }) },
         { queryKey: taskListKeys.details() },
+        { queryKey: taskListKeys.listings(), predicate: isNamedActiveListing },
         ...(reread ? [{ queryKey: ACTIVE_LISTING }] : [])
       );
     },
