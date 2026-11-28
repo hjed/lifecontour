@@ -5,7 +5,6 @@ import { CalendarDays } from 'lucide-react';
 import { ContactAvatarStack } from '@/components/contacts/ContactAvatarStack';
 import { Badge } from '@/components/ui/badge';
 import { formatIsoShortWeekdayDate } from '@/lib/date-utils';
-import { TASK_ICON_DISPLAY } from '@/lib/task-icon-display';
 import { overdueWording } from '@/lib/task-display';
 import { cn } from '@/lib/utils';
 import {
@@ -14,7 +13,7 @@ import {
   type TaskJournalRef,
 } from '@/types/tasks';
 import { TaskFlagMarker } from './TaskFlagMarker';
-import { TaskIconGlyph } from './TaskIconGlyph';
+import { TaskIconMarker } from './TaskIconMarker';
 import { TaskStatusCheckbox } from './TaskStatusCheckbox';
 
 const CONTACT_NOUN = { one: 'contact', many: 'contacts' } as const;
@@ -76,12 +75,7 @@ export function TaskRow({ task }: TaskRowProps) {
           {...(cancelled ? { describedById: cancelledId } : {})}
         />
       </span>
-      {icon && (
-        <span data-testid='task-row-icon' className='flex shrink-0'>
-          <TaskIconGlyph icon={icon} className='size-4' />
-          <span className='sr-only'>{TASK_ICON_DISPLAY[icon].label} icon</span>
-        </span>
-      )}
+      {icon && <TaskIconMarker icon={icon} testId='task-row-icon' />}
       <div className='min-w-0 flex-1'>
         <p
           data-testid='task-row-text'

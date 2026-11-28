@@ -476,6 +476,24 @@ where tasks are worked with; there is no `/tasks` route.
   task lapsed because its due journal was *cancelled* rather than because the
   date went by. `lapseWording` keeps the two distinguishable, and pure so a test
   can assert it without rendering.
+- **Icon and flag.** A task's icon is drawn before its text with
+  `TaskIconMarker` (the glyph hidden, its name — *“Tent icon”* — as visually
+  hidden text) and its flag as `TaskFlagMarker`, first in the right-hand badge
+  cluster — the same parts and places as `TaskRow` and the dashboard row, so a
+  task looks alike on every surface. The id the action group is described by
+  stays on the bare text, so neither is read as part of the commitment. The
+  row shows them only: they are edited in the task details panel
+  (ITER21-002 Phase 15), which the row's actions open.
+- **Why this is not `TaskRow`.** The canvas draws two row idioms: a journal's
+  own tasks, like the dashboard's, are the bordered card row with an accent
+  bar and an outline *Done* (W22–W24), while tasks inside a list are the
+  divider-list *Task row*. This row also carries what `TaskRow` has no place
+  for — the status and lapse badges, the reschedule, detach and delete
+  actions, the history disclosure — and holds journal-only tasks, which
+  `TaskRow`'s type refuses. A journal's associated lists render their tasks
+  with `TaskRow` in the Lists card (ITER21-005 Phase 6), and those tasks leave
+  the groups here. Merging the two into one component with card and list
+  variants was considered and deferred (ITER21-002 Phase 18).
 - **The row's left accent bar diverges from wireframe W22**, which keys it to
   the due journal's type/calendar colour: a task's journal references carry only
   id, title, date and cancelled, so the bar is keyed to whether the commitment
@@ -1316,8 +1334,9 @@ takes a `ListTaskReadResource` — a read with its list non-null, narrowed with
 `isListTask` — so a journal-only task, whose reopen needs an acknowledgement,
 cannot be handed to it. Journal tasks keep `JournalTaskRow`.
 
-- **Composition.** Checkbox, icon (`TaskIconGlyph`, its glyph hidden and its
-  name, *“House icon”*, as visually hidden text), text, then a
+- **Composition.** Checkbox, icon (`TaskIconMarker`: the `TaskIconGlyph`
+  hidden and its name, *“House icon”*, as visually hidden text — shared with
+  the journal and dashboard rows), text, then a
   meta line under the text, the flag (`TaskFlagMarker`, an `img` named
   "Flagged" in the warning colour) and the contacts (`ContactAvatarStack`), in
   the canvas's order. The meta
@@ -1918,7 +1937,11 @@ elements are numbered **W1**–**W33**.
     are both satisfied), the *"Due in ‹journal›"* link (**W26**)
     and each linked contact as a `ContactAvatar` beside their `name` (**W27**;
     note `name`, not the journal surface's `display_name` — a known divergence
-    recorded on the wire). Zero contacts renders nothing at all.
+    recorded on the wire). Zero contacts renders nothing at all. The task's
+    icon (`TaskIconMarker`) sits before the text and its flag
+    (`TaskFlagMarker`) first in the right-hand cluster, as on the journal and
+    list rows; the payload's `flagged` and `icon` are required on
+    `HomeDashboardTask`. They are shown, never edited, here.
   - **A row may have no due journal.** `HomeDashboardTask.due_journal` is
     nullable for a task on a list with no due journal. Today's selection is
     journal-only, so the server still sends one on every row; the type admits

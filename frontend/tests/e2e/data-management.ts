@@ -9,6 +9,7 @@ import { APIResponse, Page } from '@playwright/test';
 
 import { TestContact, TestJournal, TestTask } from './fixtures';
 import type { TaskListResponse } from '../../src/types/task-lists';
+import type { TaskIcon } from '../../src/types/task-icons';
 import type { TaskResponse } from '../../src/types/tasks';
 
 /**
@@ -1683,6 +1684,27 @@ export class TestDataManager {
     if (!response.ok()) {
       throw new Error(
         `Failed to set task ${taskId} to ${status}: ${response.status()} ${await response.text()}`
+      );
+    }
+  }
+
+  /**
+   * Set a task's flag and icon through the API, so a test starts from a
+   * flagged task with an icon without driving an editor it is not about.
+   */
+  async setTaskFlagAndIcon(
+    taskId: string,
+    changes: { flagged: boolean; icon: TaskIcon | null }
+  ): Promise<void> {
+    const response = await this.page.request.patch(`/api/tasks/${taskId}`, {
+      headers: { 'Content-Type': 'application/vnd.api+json' },
+      data: JSON.stringify({
+        data: { type: 'tasks', id: taskId, attributes: changes },
+      }),
+    });
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to set the flag and icon of task ${taskId}: ${response.status()} ${await response.text()}`
       );
     }
   }

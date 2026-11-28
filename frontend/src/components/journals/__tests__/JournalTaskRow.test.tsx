@@ -270,6 +270,48 @@ describe('JournalTaskRow', () => {
     });
   });
 
+  describe('icon and flag', () => {
+    it('draws the task’s icon, named for assistive technology', () => {
+      renderRow(createMockJournalTask({ icon: 'tent' }));
+
+      const icon = screen.getByTestId('journal-task-icon');
+      expect(icon.querySelector('svg.lucide-tent')).toBeInTheDocument();
+      expect(icon).toHaveTextContent('Tent icon');
+    });
+
+    it('draws no icon when the task has none', () => {
+      renderRow(createMockJournalTask({ icon: null }));
+
+      expect(screen.queryByTestId('journal-task-icon')).toBeNull();
+    });
+
+    it('marks a flagged task', () => {
+      renderRow(createMockJournalTask({ flagged: true }));
+
+      expect(screen.getByRole('img', { name: 'Flagged' })).toBeInTheDocument();
+    });
+
+    it('does not mark a task that is not flagged', () => {
+      renderRow(createMockJournalTask({ flagged: false }));
+
+      expect(screen.queryByRole('img', { name: 'Flagged' })).toBeNull();
+    });
+
+    it('describes the actions by the task text alone, not its icon or flag', () => {
+      renderRow(
+        createMockJournalTask({
+          text: 'Pack the tent poles',
+          icon: 'tent',
+          flagged: true,
+        })
+      );
+
+      expect(
+        screen.getByRole('group', { name: 'Task actions' })
+      ).toHaveAccessibleDescription('Pack the tent poles');
+    });
+  });
+
   describe('linked contacts', () => {
     it('shows an avatar and the full name of each linked contact', () => {
       renderRow(

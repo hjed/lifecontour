@@ -37,6 +37,8 @@ import Link from 'next/link';
 import type { Route } from 'next';
 import { CalendarClock } from 'lucide-react';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
+import { TaskFlagMarker } from '@/components/tasks/TaskFlagMarker';
+import { TaskIconMarker } from '@/components/tasks/TaskIconMarker';
 import type {
   HomeDashboardDueTask,
   HomeDashboardTask,
@@ -71,7 +73,7 @@ function hasDueJournal(task: HomeDashboardTask): task is HomeDashboardDueTask {
 }
 
 export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
-  const { task_id, text, contacts } = task;
+  const { task_id, text, contacts, flagged, icon } = task;
   const dueTask = hasDueJournal(task) ? task : null;
 
   return (
@@ -92,15 +94,23 @@ export function DashboardTaskRow({ task, actions }: DashboardTaskRowProps) {
           the text when the column is narrow, which is what this shared
           `flex-wrap` does: the chip and the action travel together. */}
       <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-1'>
-        <p
-          id={taskTextId(task_id)}
-          data-testid='dashboard-task-text'
-          className='min-w-0 font-medium break-words'
-        >
-          {text}
-        </p>
+        <div className='flex min-w-0 items-start gap-2'>
+          {icon && (
+            <span className='flex h-6 items-center'>
+              <TaskIconMarker icon={icon} testId='dashboard-task-icon' />
+            </span>
+          )}
+          <p
+            id={taskTextId(task_id)}
+            data-testid='dashboard-task-text'
+            className='min-w-0 font-medium wrap-anywhere'
+          >
+            {text}
+          </p>
+        </div>
 
         <div className='flex flex-wrap items-center justify-end gap-x-2 gap-y-1'>
+          {flagged && <TaskFlagMarker />}
           {/* A `<time>`, and the `dateTime` is the point rather than tidiness.
               The specification asks a row to show "the due journal's title and
               date", while W25 makes the visible label **relative** for the

@@ -57,6 +57,8 @@ export function dashboardTaskFixture(
     },
     days_away: 1,
     contacts: [],
+    flagged: false,
+    icon: null,
     ...overrides,
   };
 }

@@ -26,6 +26,7 @@ import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { JsonApiErrorResponse } from '@/types/api';
 import { ImportantDateTypeEnum } from '@/types/contacts';
+import type { TaskIcon } from '@/types/task-icons';
 import { API_ENDPOINTS, ERROR_MESSAGES } from '@/lib/constants';
 import { msUntilNextAnchorDay } from '@/lib/dashboard-anchor';
 
@@ -213,6 +214,9 @@ export interface HomeDashboardTask {
   days_away: number;
   /** In link order. Empty is ordinary — most tasks name nobody. */
   contacts: HomeDashboardTaskContact[];
+  flagged: boolean;
+  /** `null` when the task has no icon. */
+  icon: TaskIcon | null;
 }
 
 /** A dashboard row that has a due journal — the only kind a due chip can label. */

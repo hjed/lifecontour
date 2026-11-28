@@ -166,17 +166,7 @@ test.describe('Task activity history', () => {
 
     // No control sets these until the task details panel exists, so the
     // write goes through the endpoint that panel will use.
-    const response = await page.request.patch(`/api/tasks/${task.id}`, {
-      headers: { 'Content-Type': 'application/json' },
-      data: {
-        data: {
-          type: 'tasks',
-          id: String(task.id),
-          attributes: { flagged: true, icon: 'tent' },
-        },
-      },
-    });
-    await expect(response).toBeOK();
+    await data.setTaskFlagAndIcon(task.id, { flagged: true, icon: 'tent' });
 
     const historyPath = `/api/tasks/${task.id}/history`;
     await waitForHistoryEntry(
