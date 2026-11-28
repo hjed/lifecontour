@@ -3386,9 +3386,11 @@ No E2E: no UI.
   (field `name`); the MCP schema publishes no `maxLength`, leaving the domain the one rule.
 - **The LIKE escape stays private to the task-list adapter**; reusing it in
   `journal_event_link_repository.py` would cross into the integrations domain.
-- **The move cancels only the exact active listing** (`exact: true`): `useTaskLists` can now hold a
-  name-filtered active listing, which a partial key match would have cancelled mid-flight and never
-  re-read (found in review, pinned by a Jest test).
+- **A move patches only the exact active listing and re-reads the name-filtered ones**: `useTaskLists`
+  can now hold a name-filtered active listing, which a partial-key cancel would have stranded
+  mid-flight and which the move's patch never reorders. The move cancels with `exact: true` and its
+  settle invalidates every named active listing (found in review and on PR review; pinned by Jest
+  tests with two matching lists, cached and in flight).
 - **Two PRs rather than one** (user decision): layer 1 adapts REST and MCP to the new service answer with
   no behaviour change, so it merges alone.
 

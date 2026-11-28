@@ -770,11 +770,13 @@ describe('useMoveTaskList', () => {
     );
   });
 
-  it('leaves a name-filtered active listing in flight alone', async () => {
+  it('re-reads a name-filtered active listing that was in flight during the move', async () => {
     const { queryClient, wrapper } = setup();
     seedActive(queryClient);
-    const releaseFiltered = heldRequest(() =>
-      mockApiResponse(listing(summary('3', 'Trip', 5)))
+    const releaseOldOrder = heldRequest(() =>
+      mockApiResponse(
+        listing(summary('1', 'Packing trip', 3), summary('3', 'Trip', 5))
+      )
     );
     const filtered = renderHook(() => useTaskLists({ name: 'trip' }), {
       wrapper,
@@ -782,16 +784,62 @@ describe('useMoveTaskList', () => {
     await waitFor(() =>
       expect(filtered.result.current.fetchStatus).toBe('fetching')
     );
-    mockFetch.mockResolvedValueOnce(moveAnswer('2', '3', '1'));
+    mockFetch
+      .mockResolvedValueOnce(moveAnswer('2', '3', '1'))
+      .mockResolvedValueOnce(
+        mockApiResponse(
+          listing(summary('3', 'Trip', 5), summary('1', 'Packing trip', 3))
+        )
+      );
 
     const { result } = renderHook(() => useMoveTaskList(), { wrapper });
     await act(() => result.current.mutateAsync({ listId: '1', index: 2 }));
-    act(() => releaseFiltered());
+    act(() => releaseOldOrder());
 
-    await waitFor(() => expect(filtered.result.current.isSuccess).toBe(true));
-    expect(filtered.result.current.data?.data.map(entry => entry.id)).toEqual([
-      '3',
-    ]);
+    await waitFor(() =>
+      expect(filtered.result.current.data?.data.map(entry => entry.id)).toEqual(
+        ['3', '1']
+      )
+    );
+  });
+
+  it('re-reads a name-filtered active listing in the new order', async () => {
+    const { queryClient, wrapper } = setup();
+    seedActive(queryClient);
+    const filteredKey = taskListKeys.listing({
+      archived: 'active',
+      name: 'trip',
+    });
+    queryClient.setQueryData(
+      filteredKey,
+      listing(summary('1', 'Packing trip', 3), summary('3', 'Trip', 5))
+    );
+    mockFetch
+      .mockResolvedValueOnce(moveAnswer('2', '3', '1'))
+      .mockResolvedValueOnce(
+        mockApiResponse(
+          listing(summary('3', 'Trip', 5), summary('1', 'Packing trip', 3))
+        )
+      );
+    const filtered = renderHook(() => useTaskLists({ name: 'trip' }), {
+      wrapper,
+    });
+
+    const { result } = renderHook(() => useMoveTaskList(), { wrapper });
+    await act(() => result.current.mutateAsync({ listId: '1', index: 2 }));
+
+    await waitFor(() =>
+      expect(filtered.result.current.data?.data.map(entry => entry.id)).toEqual(
+        ['3', '1']
+      )
+    );
+    expect(lastRequest().url).toBe('/api/task-lists?archived=active&name=trip');
+    // The move's own answer is the active order, so that listing is not re-read.
+    expect(
+      mockFetch.mock.calls.filter(
+        ([url]) => String(url) === '/api/task-lists?archived=active'
+      )
+    ).toHaveLength(0);
   });
 
   it('puts the order back when the move fails', async () => {
