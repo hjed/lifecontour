@@ -391,3 +391,21 @@ export function linkRemovable(role: TaskLinkRole): boolean {
 export function tasksDueWording(count: number): string {
   return `${count} task${count === 1 ? '' : 's'} due in this journal`;
 }
+
+/**
+ * A list page's count line, e.g. "7 open · 1 overdue".
+ *
+ * Counted from `status` rather than the row count: an optimistic tick leaves
+ * the row in place, marked done, until the refetch drops it.
+ */
+export function openTasksSummary(
+  tasks: readonly { readonly attributes: TaskReadAttributes }[]
+): string {
+  const open = tasks.filter(
+    task => task.attributes.status === TaskStatus.NOT_DONE
+  );
+  const overdue = open.filter(task => task.attributes.overdue).length;
+  return overdue > 0
+    ? `${open.length} open · ${overdue} overdue`
+    : `${open.length} open`;
+}

@@ -67,6 +67,7 @@ export function TaskRow({ task }: TaskRowProps) {
   return (
     <li
       data-testid={`task-row-${task.id}`}
+      data-task-id={task.id}
       className='border-border flex min-h-14 items-center gap-3 border-b py-2'
     >
       <span className='flex size-11 shrink-0 items-center justify-center'>

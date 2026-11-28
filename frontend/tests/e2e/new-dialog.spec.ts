@@ -16,27 +16,16 @@ import {
   taskPanel,
 } from './utils/new-dialog';
 import { chooseDueJournal } from './utils/retarget-dialog';
-
-const MIN_TOUCH_TARGET = 44;
+import {
+  expectNoHorizontalScroll,
+  expectTouchTarget,
+} from './utils/phone-layout';
 
 /** The opened contact's first name, shown as its inline-edit control. */
 function contactFirstName(page: Page) {
   return page
     .getByRole('region', { name: 'Contact Detail' })
     .getByRole('button', { name: 'First name' });
-}
-
-/**
- * Assert a target is at least 44px each way. Retried, because the dialog
- * zooms in from 95% scale: a box read mid-animation comes up a fraction short.
- */
-async function expectTouchTarget(target: Locator) {
-  await expect(async () => {
-    const box = await target.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    expect(box!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-  }).toPass({ timeout: 5_000 });
 }
 
 /** The opened journal's title, shown as its inline-edit field. */
@@ -261,15 +250,11 @@ test.describe('New dialog — phone', () => {
     if (!isMobile) test.skip();
 
     await page.goto('/contacts');
-    const noHorizontalScroll = () =>
-      page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth
-      );
-    expect(await noHorizontalScroll()).toBe(true);
+    await expectNoHorizontalScroll(page);
 
     // Measured before opening: the open modal hides the rest of the page
     // from the accessibility tree.
-    await expectTouchTarget(newButton(page));
+    await expectTouchTarget(newButton(page), { retry: true });
     const dialog = await openNewDialog(page);
 
     // The sheet is pinned to the top edge and spans the viewport.
@@ -279,12 +264,14 @@ test.describe('New dialog — phone', () => {
       expect(Math.round(box!.y)).toBe(0);
       expect(Math.round(box!.width)).toBe(390);
     }).toPass();
-    expect(await noHorizontalScroll()).toBe(true);
+    await expectNoHorizontalScroll(page);
 
-    await expectTouchTarget(newTypeButton(dialog, 'Task'));
-    await expectTouchTarget(newTypeButton(dialog, 'Journal'));
-    await expectTouchTarget(newTypeButton(dialog, 'Contact'));
-    await expectTouchTarget(dialog.getByRole('button', { name: 'Close' }));
+    await expectTouchTarget(newTypeButton(dialog, 'Task'), { retry: true });
+    await expectTouchTarget(newTypeButton(dialog, 'Journal'), { retry: true });
+    await expectTouchTarget(newTypeButton(dialog, 'Contact'), { retry: true });
+    await expectTouchTarget(dialog.getByRole('button', { name: 'Close' }), {
+      retry: true,
+    });
   });
 
   test('creates a contact from the New sheet', async ({
@@ -322,11 +309,7 @@ test.describe('New dialog — phone', () => {
     const dialog = await openNewDialog(page);
     await selectNewType(dialog, 'Journal');
     // The whole journal form fits the 390px sheet without sideways scroll.
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth
-      )
-    ).toBe(true);
+    await expectNoHorizontalScroll(page);
     await expect(async () => {
       const box = await dialog.boundingBox();
       expect(box).not.toBeNull();
@@ -373,12 +356,10 @@ test.describe('New dialog — phone', () => {
     expect(
       await dialog.evaluate(sheet => sheet.scrollWidth <= sheet.clientWidth)
     ).toBe(true);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth
-      )
-    ).toBe(true);
-    await expectTouchTarget(panel.getByTestId('create-task-dialog-submit'));
+    await expectNoHorizontalScroll(page);
+    await expectTouchTarget(panel.getByTestId('create-task-dialog-submit'), {
+      retry: true,
+    });
 
     const journalId = await submitTaskFromDialog(page, dialog);
 

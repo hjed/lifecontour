@@ -37,6 +37,12 @@ const ROUTE_LABELS: Record<string, string> = {
 };
 
 /**
+ * Pages that draw a breadcrumb of their own, naming what the pathname cannot
+ * (a task list's name), so this one would only repeat it with an id.
+ */
+const ROUTES_WITH_OWN_BREADCRUMB: readonly RegExp[] = [/^\/tasks\/\d+$/];
+
+/**
  * Generate a human-readable label for dynamic route segments.
  *
  * Handles numeric IDs and provides contextual labels based on the parent route.
@@ -109,7 +115,11 @@ export function Breadcrumb({
   const items = customItems || generateBreadcrumbs(pathname);
 
   // Don't show breadcrumbs on home page
-  if (pathname === '/' || items.length === 0) {
+  if (
+    pathname === '/' ||
+    items.length === 0 ||
+    ROUTES_WITH_OWN_BREADCRUMB.some(route => route.test(pathname))
+  ) {
     return null;
   }
 

@@ -3250,6 +3250,7 @@ picker's own behaviour, so they need only test it in context.
 
 #### Phase 4: List page: header and open tasks
 
+**Status:** 🚧 IN PROGRESS — planned as a native stack of three PRs: (1) the page's parts, (2) the view and its reads, (3) the route, E2E and docs.
 **Prerequisites:** Phase 3.
 **Estimated diff:** ~200 production → **~1,000 tracked**
 

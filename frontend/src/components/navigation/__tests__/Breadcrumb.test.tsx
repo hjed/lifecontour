@@ -48,6 +48,25 @@ describe('Breadcrumb', () => {
       expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
     });
 
+    it('does not render on a task list, which draws its own', () => {
+      mockUsePathname.mockReturnValue('/tasks/12');
+      render(<Breadcrumb />);
+
+      expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    });
+
+    it.each(['/tasks/templates', '/journals/5'])(
+      'still renders on %s',
+      pathname => {
+        mockUsePathname.mockReturnValue(pathname);
+        render(<Breadcrumb />);
+
+        expect(
+          screen.getByRole('navigation', { name: 'Breadcrumb navigation' })
+        ).toBeInTheDocument();
+      }
+    );
+
     it('applies custom className', () => {
       mockUsePathname.mockReturnValue('/contacts');
       render(<Breadcrumb className='custom-class' />);
