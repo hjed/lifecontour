@@ -59,6 +59,7 @@ import {
   NO_RETRY,
   readJson,
   reportFailure,
+  retryReadUnlessRefused,
   taskHistoryKeys,
   taskKeys,
 } from './tasks';
@@ -412,6 +413,7 @@ export function useTaskList(listId: string) {
     queryFn: () => fetchTaskList(listId),
     enabled: !!listId,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: retryReadUnlessRefused,
   });
 }
 

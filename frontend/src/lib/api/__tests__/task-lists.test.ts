@@ -23,6 +23,9 @@ import { TaskApiError, taskHistoryKeys, taskKeys } from '../tasks';
 import { historyKeys } from '../contacts';
 import { homeDashboardKeys } from '../home-dashboard';
 import { journalKeys } from '../journal-keys';
+import { createElement, type ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QUERY_CLIENT_DEFAULT_OPTIONS } from '@/lib/query-client-options';
 import { createQueryTestHarness, mockApiResponse } from '@/test-utils';
 import type {
   TaskListResource,
@@ -1123,6 +1126,24 @@ describe('useMoveTaskList', () => {
         .catch(() => undefined);
     });
 
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('useTaskList with the application retry defaults', () => {
+  it('shows a refusal at once rather than retrying it', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: QUERY_CLIENT_DEFAULT_OPTIONS,
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    mockFetch.mockResolvedValueOnce(
+      apiError(404, 'TASK_LIST_NOT_FOUND', 'Task list not found')
+    );
+
+    const { result } = renderHook(() => useTaskList('9'), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
