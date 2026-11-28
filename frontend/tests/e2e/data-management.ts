@@ -1760,11 +1760,17 @@ export class TestDataManager {
   }
 
   /** Create a task list through the API, tracked so cleanup deletes it. */
-  async createTaskList(name: string): Promise<TestTaskList> {
+  async createTaskList(
+    name: string,
+    { icon }: { icon?: TaskIcon } = {}
+  ): Promise<TestTaskList> {
     const response = await this.page.request.post('/api/task-lists', {
       headers: { 'Content-Type': 'application/vnd.api+json' },
       data: JSON.stringify({
-        data: { type: 'task-lists', attributes: { name } },
+        data: {
+          type: 'task-lists',
+          attributes: { name, ...(icon ? { icon } : {}) },
+        },
       }),
     });
     if (!response.ok()) {
@@ -1777,6 +1783,58 @@ export class TestDataManager {
     this.createdTaskListIds.push(resource.id);
     console.debug(`📝 [Data Manager] Created task list ${resource.id}`);
     return { id: resource.id, name: resource.attributes.name };
+  }
+
+  /**
+   * Delete a task list through the API, as a list removed elsewhere would be.
+   * Its tasks without both journals go with it.
+   */
+  async deleteTaskList(listId: string): Promise<void> {
+    const response = await this.page.request.delete(
+      `/api/task-lists/${listId}`
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to delete task list: ${response.status()} ${await response.text()}`
+      );
+    }
+    this.createdTaskListIds = this.createdTaskListIds.filter(
+      id => id !== listId
+    );
+    console.debug(`🗑️ [Data Manager] Deleted task list ${listId}`);
+  }
+
+  /**
+   * Place a task on its list directly after `afterTaskId`, or at the top for
+   * `null`, through the API. No control does this until reordering exists.
+   */
+  async reorderListTask(
+    taskId: string,
+    afterTaskId: string | null
+  ): Promise<void> {
+    const response = await this.page.request.post(
+      `/api/tasks/${taskId}/reorder`,
+      {
+        headers: { 'Content-Type': 'application/vnd.api+json' },
+        data: JSON.stringify({
+          data: {
+            type: 'task-reorders',
+            attributes: {
+              after_task_id:
+                afterTaskId === null ? null : Number.parseInt(afterTaskId, 10),
+            },
+          },
+        }),
+      }
+    );
+    if (!response.ok()) {
+      throw new Error(
+        `Failed to reorder task: ${response.status()} ${await response.text()}`
+      );
+    }
+    console.debug(
+      `📝 [Data Manager] Placed task ${taskId} after ${afterTaskId ?? 'nothing (top)'}`
+    );
   }
 
   /**

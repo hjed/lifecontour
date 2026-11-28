@@ -3248,16 +3248,113 @@ picker's own behaviour, so they need only test it in context.
 - *Phases 13, 19:* a read-only row (archived list) is still to add.
 - *Phase 18:* reuse `TaskFlagMarker` and Phase 2's `TaskIconGlyph` on the journal and dashboard rows.
 
-#### Phase 4: List page: header and open tasks
+#### Phase 4: List page: header and open tasks ✅ DONE
 
-**Status:** 🚧 IN PROGRESS — planned as a native stack of three PRs: (1) the page's parts, (2) the view and its reads, (3) the route, E2E and docs.
+**Status:** ✅ DONE — a native stack of three PRs: (1) the page's parts, (2) the view and its reads, (3) the route, E2E and docs.
 **Prerequisites:** Phase 3.
-**Estimated diff:** ~200 production → **~1,000 tracked**
+**Estimated diff:** ~200 production → **~1,000 tracked** · re-estimated in planning at ~1,560 tracked (layers ~660, ~440, ~460) · **Actual:**
+- **Layer 1:** 626 tracked (570 added, 56 removed, about 50 of them the two specs' helper copies).
+- **Layer 2:** 524.
+- **Layer 3:** 640 including this document (185 of docs).
+- **Total:** about 1,790 tracked, about 400 of them production. That is ×1.8 on the tracked estimate and ×2 on the production one.
+
+Plan review added three things the estimate did not count, and the independent review after implementation added about 170 lines of tests:
+- reads that don't retry a refusal;
+- the focus hand-off;
+- the shared phone-layout helpers.
+
+Re-estimate the later list-page phases (5, 10, 11, 15) with their focus and phone checks counted.
 
 **Acceptance Criteria:**
 
-- [ ] `/tasks/[id]`, breadcrumb, open tasks in order, complete in place, empty state.
-- [ ] Creates `task-lists.spec.ts` and helpers.
+- [x] `/tasks/[id]`, breadcrumb, open tasks in order, complete in place, empty state.
+- [x] Creates `task-lists.spec.ts` and helpers.
+
+**What landed:**
+- **Route:** `app/tasks/[id]/page.tsx`, a server page (`metadata`, `AuthGuard`) handing the raw segment to the client `components/tasks/TaskListPage.tsx`.
+- **`TaskListPage`:**
+  - `useTaskList` + `useTaskListOpenTasks`;
+  - skeletons (`aria-busy`);
+  - one `TaskListNotFound` for an id `parseTaskListId` (`lib/task-list-id.ts`) refuses, and for `TASK_LIST_NOT_FOUND`;
+  - an alert for any other failure before the page has loaded. A failed refetch keeps the page; a refetch refused as not found shows not-found.
+- **`TaskListBreadcrumb`:** Home › Tasks › the list (`aria-current`). *Tasks* is text.
+- **`TaskListHeader`:** the icon tile, `h1`, and `openTasksSummary` (`lib/task-display.ts`), "N open · M overdue", counted from not-done rows.
+- **`TaskListOpenTasks`:**
+  - a region named by a hidden `h2`, holding a `<ul>` of `TaskRow`s;
+  - the empty state (*No open tasks on this list* / *Tasks you add to this list will appear here.*);
+  - a focus hand-off to the first row after it still there, the last row, or the heading (shown while focused) when the focused row leaves.
+  - `TaskRow` gained `data-task-id` for it.
+- **Retries:** `retryReadUnlessRefused` (`lib/api/tasks.ts`) on `useTaskList` and `useTaskListOpenTasks`: 4xx refusals are not retried; other failures, 408 and 429 keep `DEFAULT_QUERY_RETRIES` (now exported from `query-client-options.ts`).
+- **Global breadcrumb:** the layout's `Breadcrumb` is hidden on `/tasks/<digits>` (`ROUTES_WITH_OWN_BREADCRUMB`).
+- **Checkbox hit area:** `TaskStatusCheckbox` inset changed `after:-inset-3.5` → `after:-inset-[15px]`. The old value gave a 42px hit area, because the pseudo-element is placed from the padding box inside the 1px border.
+- **E2E support:**
+  - `tests/e2e/utils/phone-layout.ts` (`expectNoHorizontalScroll`, `expectTouchTarget`, `expectTouchHitArea`); `task-icon-picker.spec.ts` and `new-dialog.spec.ts` moved onto it;
+  - `tests/e2e/utils/task-lists.ts`;
+  - `TestDataManager.createTaskList(name, { icon })`, `reorderListTask`, `deleteTaskList`.
+- **Docs:** `frontend-design.md` *The List Page* (and the row's touch-target note); `testing-strategy.md` *Phone Layout Assertions*.
+
+**Tests:**
+- **Unit:**
+  - `TaskListBreadcrumb.test.tsx`; `TaskListHeader.test.tsx`;
+  - `TaskListOpenTasks.test.tsx`: order, empty state, and seven focus hand-off cases (next, next still there after two leave, last, heading, focus moved away, focus taken out of the list, a click away to the page);
+  - `openTasksSummary` in `task-display.test.ts`;
+  - `task-list-id.test.ts`;
+  - `task-read-retry.test.ts` (400/404 refused; 500, 408, 429 and a network failure retried), plus a 404-fetches-once test per hook under `QUERY_CLIENT_DEFAULT_OPTIONS`;
+  - `Breadcrumb.test.tsx`: hidden on `/tasks/12`; shown on `/tasks/templates` and `/journals/5`;
+  - `app/tasks/[id]/__tests__/page.test.tsx`.
+- **Frontend integration** (`TaskListPage.test.tsx`, real `QueryClient`):
+  - skeleton;
+  - breadcrumb, header and rows;
+  - invalid id with no request;
+  - 404 from the list read, and from the tasks read alone;
+  - a 404 refetch over a loaded page (deleted while open);
+  - a 500 refetch over a loaded page keeps it;
+  - a 500 shown after its four attempts;
+  - tick with the write held open → the row is still there, checked, while the count drops; it leaves on refetch.
+- **E2E** (`task-lists.spec.ts`, Firefox and Mobile Chrome):
+  - header and breadcrumb (the layout's breadcrumb absent);
+  - manual order after an API reorder, with a due-journal link;
+  - complete in place, still gone after reload;
+  - keyboard tick with focus on the next row;
+  - a click on blank space while the refetch is held takes no focus back (Greptile review);
+  - empty state;
+  - deleted list not found within 5s;
+  - `/tasks/not-a-list`;
+  - 390px: no sideways scroll, 44px for the breadcrumb Home link, the checkbox (hit area, edges and corners) and the due-journal link, with long unbroken strings;
+  - 390px: the not-found state fits, with a 44px *Go home*.
+- **No backend test:** nothing in Python or `core_shared` changed.
+
+**Decisions:**
+- **User decision in plan review: empty-state wording (Option A).** It says so now; Phase 5 turns it into an invitation that focuses the add row.
+- **The ticket was titled "ITER21-001 Phase 4".** It was read as this phase.
+- **"Tasks" in the breadcrumb is not a link** until `/tasks` exists (Phase 7), so there is no dead link.
+- **The layout's breadcrumb is hidden on `/tasks/<digits>` only.** It cannot name the list. This departs from `/journals/[id]`, which shows both, and follows the canvas, which draws one.
+- **The id is checked on the client, so there is one not-found state.** A server `notFound()` would show Next's default 404 for invalid ids only.
+- **Header counts come from the payload rows.** The canvas draws "7 open · 1 overdue"; the open-tasks read is unpaged.
+- **No header actions menu yet.** Each action has its own phase (6, 14, 17; ITER21-005 Phase 4), and an empty menu would be a dead control.
+- **Archived lists render normally here.** Nothing links to them yet, and a tick is refused and rolled back. Read-only is Phase 13.
+- **The checkbox hit-area fix belongs to this phase.** Phase 3 handed the row's phone checks to this phase's E2E, and that E2E found the 2px shortfall.
+- **Independent review after implementation.** Applied:
+  - the focus hand-off skipping a row when two leave at once;
+  - 408 and 429 retried;
+  - the retry count shared with the client defaults;
+  - the loading region as `role="status"`;
+  - the hand-off heading visible while focused;
+  - the hit-area probe tightened to catch 42–43px (checked against the old inset);
+  - tests for cached-data refetches, a tasks-only 404, the held write and the blur branch;
+  - the not-found page's phone check.
+
+  Not applied:
+  - **The list's own icon in the header has no screen-reader name.** The list's name beside it already says what it is, unlike a task's icon.
+  - **The layout breadcrumb's `/tasks/<digits>` match differs from `parseTaskListId` at its edges** (`/tasks/0`). Both render the same not-found state, and Phase 7 revisits the breadcrumb.
+
+**Notes for later phases:**
+- *Phase 5:* put the add row at the bottom of `TaskListOpenTasks`' section. Make the empty state's second line an action that focuses it ("Add the first task"), with an E2E. The focus hand-off already sends focus to the section heading when the last task leaves.
+- *Phases 6, 14, 17 and ITER21-005 Phase 4:* the header's actions go to the right of the name in `TaskListHeader` (the canvas's "Link to a journal" button and `…` menu). On phones keep them at 44px.
+- *Phase 7:* make *Tasks* in `TaskListBreadcrumb` a link to `/tasks`, and decide whether `/tasks` keeps the layout's pathname breadcrumb (`ROUTES_WITH_OWN_BREADCRUMB`).
+- *Phase 11:* the *Completed* group sits below the open-tasks section. A list with only completed tasks still reads "No open tasks on this list", which stays true.
+- *Phase 13:* an archived list opens here today with live checkboxes. Make it read-only, and decide the archived page's breadcrumb.
+- *All ITER21-002 UI phases:* add to `task-lists.spec.ts` and use `utils/phone-layout.ts` for the 390px checks.
 
 #### Phase 5: Inline add row and inline text edit
 

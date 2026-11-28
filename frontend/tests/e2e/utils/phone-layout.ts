@@ -42,3 +42,35 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
     )
     .toBe(true);
 }
+
+/**
+ * Assert a control answers a touch across the 44px square around its centre,
+ * for a control drawn smaller than its hit area (a checkbox whose
+ * pseudo-element inset widens it), which no bounding box can measure.
+ *
+ * The edges and corners are probed a quarter pixel inside the square, so a
+ * 42px or 43px area, or a round one, fails.
+ */
+export async function expectTouchHitArea(target: Locator): Promise<void> {
+  const box = await target.boundingBox();
+  expect(box).not.toBeNull();
+  const centreX = box!.x + box!.width / 2;
+  const centreY = box!.y + box!.height / 2;
+  const reach = MIN_TOUCH_TARGET / 2 - 0.25;
+  const offsets = [-reach, 0, reach];
+  const probes = offsets
+    .flatMap(dx => offsets.map(dy => [centreX + dx, centreY + dy] as const))
+    .filter(([x, y]) => x !== centreX || y !== centreY);
+
+  for (const [x, y] of probes) {
+    const missedBy = await target.evaluate(
+      (element, point) => {
+        const hit = document.elementFromPoint(point.x, point.y);
+        if (hit !== null && element.contains(hit)) return null;
+        return hit === null ? 'nothing' : hit.outerHTML.slice(0, 160);
+      },
+      { x, y }
+    );
+    expect(missedBy, `a touch at (${x}, ${y}) reaches the control`).toBeNull();
+  }
+}

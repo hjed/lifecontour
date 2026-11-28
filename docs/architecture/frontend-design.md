@@ -1362,8 +1362,64 @@ cannot be handed to it. Journal tasks keep `JournalTaskRow`.
 - **Contacts are not links.** The avatars are named images; 24px links would
   fall short of the 44px touch target. The task's contacts are acted on from
   its details panel.
-- **Touch targets.** The checkbox's hit area is its own `after:` inset widened
-  to about 44px, and the due-journal link is `max-sm:min-h-11`.
+- **Touch targets.** The checkbox's hit area is its own `after:` inset,
+  `-inset-[15px]`: an absolute pseudo-element is placed from the 14px padding
+  box inside the 1px border, so 15px each way makes exactly 44px (the earlier
+  `-inset-3.5` made 42px). `task-lists.spec.ts` probes it with
+  `expectTouchHitArea`, since no bounding box measures a pseudo-element. The
+  due-journal link is `max-sm:min-h-11`.
+
+### The List Page
+
+`/tasks/[id]` is one list: a breadcrumb, a header and its open tasks
+(ITER21-002 Phase 4). Later phases add the inline add row, the header's
+actions, reordering and the *Completed* group to it.
+
+- **Server route, client view.** `app/tasks/[id]/page.tsx` is a server
+  component holding the `metadata` and the `AuthGuard`. It hands the raw
+  route segment to `TaskListPage` (`components/tasks/`), a client component,
+  because the list and its tasks come from React Query hooks
+  (`useTaskList`, `useTaskListOpenTasks`) like every other detail page.
+- **One not-found state.** `parseTaskListId` turns away a segment that cannot
+  name a list (not a positive whole number up to 2³¹−1, the backend's
+  integer column) without a request. `TASK_LIST_NOT_FOUND` from either read
+  comes to the same `TaskListNotFound`, so a missing list, another user's and
+  `/tasks/abc` all read *List not found*. A server `notFound()` was not used:
+  with no `not-found.tsx` it would show Next's default page for one of the
+  three.
+- **Refusals are not retried.** Both reads take `retryReadUnlessRefused`
+  (`lib/api/tasks.ts`): a server or network failure, a 408 or a 429 keeps the
+  application's `DEFAULT_QUERY_RETRIES`, any other 4xx gets none. Under the
+  default backoff a missing list sat on its skeleton for seven seconds before
+  saying so. Any other failure before the page has loaded shows an alert once
+  its retries are spent; a failed refetch keeps the page as last loaded, while
+  a refetch answering `TASK_LIST_NOT_FOUND` (the list deleted while open)
+  turns it into *List not found*.
+- **Its own breadcrumb.** `TaskListBreadcrumb` reads Home › Tasks › the list,
+  with the list as `aria-current="page"`. *Tasks* is text until the overview
+  exists to link to (Phase 7). The layout's pathname `Breadcrumb` is hidden
+  on `/tasks/<digits>` (`ROUTES_WITH_OWN_BREADCRUMB`), since all it can say
+  there is "tasks › #12". `/journals/[id]` still shows both; other `/tasks`
+  routes keep the layout's until their own phases decide.
+- **Header.** The icon in a 44px tile (no tile without one), the name as the
+  page's `h1`, and `openTasksSummary`'s "7 open · 1 overdue". The counts are
+  taken from rows with `status === not_done` rather than the row count,
+  because an optimistic tick leaves the row, marked done, until the refetch.
+- **Open tasks.** A section named by a visually hidden `h2`, holding a `<ul>`
+  of `TaskRow`s in the list's own order. An empty list reads *No open tasks on
+  this list — Tasks you add to this list will appear here*; the invitation
+  becomes an action with the add row (Phase 5).
+- **Complete in place.** Nothing new writes: `TaskStatusCheckbox` ticks
+  optimistically, and its refresh of `taskKeys.onLists()` refetches the list,
+  which no longer holds the task.
+- **Focus hand-off.** That refetch unmounts the focused row, dropping focus to
+  the body. `TaskListOpenTasks` remembers which row held focus and, when that
+  row leaves while focus is lost, moves it to the first row after it that is
+  still there (so two quick ticks do not skip a row), else the new last row,
+  else the section heading, which is visually hidden except while it holds
+  focus. Focus the user has moved elsewhere is left alone, including a click
+  on blank space: a blur from a row still on the page forgets the row, while
+  the blur of a row being removed (already detached) does not.
 
 ### TypeScript Integration
 
