@@ -39,6 +39,8 @@ const DUE_TODAY: HomeDashboardTask = {
   due_journal: { id: 44, title: 'Friday planning', date: '2026-07-31' },
   days_away: 0,
   contacts: [],
+  flagged: false,
+  icon: null,
 };
 
 const DUE_IN_TWO_DAYS: HomeDashboardTask = {

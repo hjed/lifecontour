@@ -172,6 +172,8 @@ const A_TASK: HomeDashboardTask = {
   due_journal: { id: 44, title: 'Friday planning', date: '2026-08-01' },
   days_away: 3,
   contacts: [],
+  flagged: false,
+  icon: null,
 };
 
 function populatedDashboard(): HomeDashboardResponse {
@@ -917,6 +919,8 @@ describe('HomePage — the dashboard shell', () => {
       due_journal: { id: 44, title: 'Friday planning', date: '2026-08-01' },
       days_away: 3,
       contacts: [],
+      flagged: false,
+      icon: null,
     };
 
     function respondWithTasks() {

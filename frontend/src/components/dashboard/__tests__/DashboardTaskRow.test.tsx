@@ -31,11 +31,53 @@ function dashboardTask(
     due_journal: { id: 44, title: 'Friday planning', date: '2026-08-01' },
     days_away: 2,
     contacts: [],
+    flagged: false,
+    icon: null,
     ...overrides,
   };
 }
 
 describe('DashboardTaskRow', () => {
+  describe('icon and flag', () => {
+    it('draws the task’s icon, named for assistive technology', () => {
+      render(<DashboardTaskRow task={dashboardTask({ icon: 'tent' })} />);
+
+      const icon = screen.getByTestId('dashboard-task-icon');
+      expect(icon.querySelector('svg.lucide-tent')).toBeInTheDocument();
+      expect(icon).toHaveTextContent('Tent icon');
+    });
+
+    it('draws no icon when the task has none', () => {
+      render(<DashboardTaskRow task={dashboardTask({ icon: null })} />);
+
+      expect(screen.queryByTestId('dashboard-task-icon')).toBeNull();
+    });
+
+    it('marks a flagged task', () => {
+      render(<DashboardTaskRow task={dashboardTask({ flagged: true })} />);
+
+      expect(screen.getByRole('img', { name: 'Flagged' })).toBeInTheDocument();
+    });
+
+    it('does not mark a task that is not flagged', () => {
+      render(<DashboardTaskRow task={dashboardTask({ flagged: false })} />);
+
+      expect(screen.queryByRole('img', { name: 'Flagged' })).toBeNull();
+    });
+
+    it('keeps the icon and flag out of the text the actions are described by', () => {
+      const { container } = render(
+        <DashboardTaskRow
+          task={dashboardTask({ task_id: 12, icon: 'tent', flagged: true })}
+        />
+      );
+
+      expect(
+        container.querySelector(`[id="${taskTextId(12)}"]`)
+      ).toHaveTextContent(/^Send Priya the deposit receipt$/);
+    });
+  });
+
   it('draws the commitment as a prominent line that is not a link (W23)', () => {
     render(<DashboardTaskRow task={dashboardTask()} />);
 

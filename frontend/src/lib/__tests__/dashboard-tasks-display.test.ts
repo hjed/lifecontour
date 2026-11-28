@@ -29,6 +29,8 @@ function task(daysAway: number, dueDate: string): HomeDashboardDueTask {
     due_journal: { id: 7, title: 'Friday', date: dueDate },
     days_away: daysAway,
     contacts: [],
+    flagged: false,
+    icon: null,
   };
 }
 

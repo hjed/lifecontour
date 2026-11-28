@@ -21,6 +21,8 @@ import type { Route } from 'next';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { ContactAvatar } from '@/components/contacts/ContactAvatar';
 import { TaskActivityFeed } from '@/components/tasks/TaskActivityFeed';
+import { TaskFlagMarker } from '@/components/tasks/TaskFlagMarker';
+import { TaskIconMarker } from '@/components/tasks/TaskIconMarker';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { nameParts } from '@/lib/contact-names';
@@ -63,16 +65,25 @@ interface JournalTaskRowProps {
  * or overdue row is marked out the same way, since both are a live commitment
  * whose date has gone by.
  */
-function accentClass(status: TaskStatus, flagged: boolean): string {
-  if (flagged) return 'bg-destructive';
+function accentClass(status: TaskStatus, datePassed: boolean): string {
+  if (datePassed) return 'bg-destructive';
   return status === TaskStatus.NOT_DONE
     ? 'bg-primary'
     : 'bg-muted-foreground/40';
 }
 
 export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
-  const { text, status, lapsed, lapse_reason, overdue, due_journal, contacts } =
-    task.attributes;
+  const {
+    text,
+    status,
+    icon,
+    flagged,
+    lapsed,
+    lapse_reason,
+    overdue,
+    due_journal,
+    contacts,
+  } = task.attributes;
   // The actions are named the same on every row, so they are described by the
   // text of the commitment they act on rather than by a label of their own.
   const textId = useId();
@@ -116,16 +127,23 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
       />
 
       <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-1'>
-        <p
-          id={textId}
-          data-testid='journal-task-text'
-          className={cn(
-            'font-medium',
-            isTerminal && 'text-muted-foreground line-through'
+        <div className='flex min-w-0 items-start gap-2'>
+          {icon && (
+            <span className='flex h-6 items-center'>
+              <TaskIconMarker icon={icon} testId='journal-task-icon' />
+            </span>
           )}
-        >
-          {text}
-        </p>
+          <p
+            id={textId}
+            data-testid='journal-task-text'
+            className={cn(
+              'min-w-0 font-medium wrap-anywhere',
+              isTerminal && 'text-muted-foreground line-through'
+            )}
+          >
+            {text}
+          </p>
+        </div>
 
         {/* W24 puts the actions top-right of the text row and lets them wrap
             under it when the column is narrow, which is what this cluster
@@ -133,6 +151,7 @@ export function JournalTaskRow({ task, journalId, role }: JournalTaskRowProps) {
             badges alongside. */}
         <div className='flex flex-wrap items-center justify-end gap-x-3 gap-y-1'>
           <div className='flex flex-wrap items-center gap-1.5'>
+            {flagged && <TaskFlagMarker />}
             <Badge variant={isTerminal ? 'secondary' : 'outline'}>
               {statusWording(status)}
             </Badge>

@@ -3276,6 +3276,9 @@ picker's own behaviour, so they need only test it in context.
 
 - [ ] One dialog; rename and icon wired into the list header.
 
+**Notes from Phase 18's planning:**
+- `TaskIconPicker`'s search is an `<Input type='search'>` with no key handling, so Enter in it submits the form around it — inside a dialog with Save, a user who searches and presses Enter submits before choosing. Stop Enter there in the picker itself (`preventDefault`), with an RTL case, so every form embedding it gets the fix.
+
 #### Phase 7: `/tasks` overview
 
 **Prerequisites:** Phase 6.
@@ -3358,11 +3361,22 @@ picker's own behaviour, so they need only test it in context.
 #### Phase 15: Task details: due, flag, icon
 
 **Prerequisites:** Phase 4, Phase 2.
-**Estimated diff:** ~190 production → **~950 tracked**
+**Estimated diff:** ~190 production → **~950 tracked** · re-estimated in Phase 18's planning at **~1,150 tracked**, once opening the panel from journal task rows moved here (about 200 lines: the journal-row trigger, the picker's Enter fix, the switch's 44px hit area and a journal-page E2E).
 
 **Acceptance Criteria:**
 
 - [ ] Side panel.
+- [ ] The details panel also opens from journal task rows, so flag and icon are editable from the journal page (moved from Phase 18 by user decision).
+
+**Notes from Phase 18's planning:**
+- **Trigger on a journal row:** an icon-only ghost "Task details" button in the `JournalTaskActions` group, before delete, taking `disabled={writing}` — the prop pattern `RetargetTaskDialog` and `DetachMentionButton` use, so the per-task lock is tested once, at the group.
+- **The panel's `task` prop** can be `{ id: string; attributes: TaskReadAttributes }`, which both `JournalTaskResource` and `ListTaskReadResource` satisfy.
+- **One Save, one PATCH of only the changed fields.** `OneChange` (`types/tasks.ts`) accepts several fields; type the diff as a non-empty change or `null` (no request), since a `Partial` cannot be spread into `TaskUpdateInput` without a cast. A form commits the icon on Save, never per arrow key (Phase 2).
+- **Sheet width:** `SheetContent side='right'` defaults to `w-3/4 sm:max-w-sm`; the *Task details* artboard is 480px, so pass `w-full sm:max-w-[480px]`.
+- **The Flag switch is 18.4px tall.** `ui/switch`'s `after:` hit area is about 56×34px; reach 44px with a widened `after:` inset on a `min-h-11` label row, as `TaskStatusCheckbox` does, and assert the real target.
+- **Enter in `TaskIconPicker`'s search** submits an enclosing form (see Phase 6); fix it in the picker if Phase 6 has not.
+- **E2E:** wait for the Sheet to open on the trigger's `aria-expanded`, not `isVisible()` (the slide-in race). The journal-page E2E belongs in `journal-tasks.spec.ts`, beside the journal rows it opens from.
+- The row's icon and flag markers stay: the row shows state, the panel changes it.
 
 #### Phase 16: Task details: move and remove
 
@@ -3382,14 +3396,38 @@ picker's own behaviour, so they need only test it in context.
 
 - [ ] Contacts; link to task history; the list's history from its header.
 
-#### Phase 18: Flag and icon on journal and dashboard rows
+#### Phase 18: Flag and icon on journal and dashboard rows ✅ DONE
 
+**Status:** ✅ DONE
 **Prerequisites:** Phase 2.
-**Estimated diff:** ~130 production → **~650 tracked**
+**Estimated diff:** ~130 production → **~650 tracked** · re-planned display-only at ~375 tracked once editing moved to Phase 15 · **Actual:** ~110 production → **~430 tracked** (about 380 insertions, 50 deletions, including this document): about 110 production, 200 test lines (85 RTL, 120 E2E and its helper), 120 docs. It ran over the ~375 re-plan on the iteration-doc notes carried to Phase 15.
 
 **Acceptance Criteria:**
 
-- [ ] Shown on both; editable from the journal page.
+- [x] Shown on both. *(Editable from the journal page moved to Phase 15 by user decision.)*
+
+**What landed:**
+- **`components/tasks/TaskIconMarker.tsx`** — the glyph (`TaskIconGlyph`, hidden) with its name as visually hidden text (*"Tent icon"*), extracted from `TaskRow`, which now uses it.
+- **Journal row** (`JournalTaskRow`) — the icon before the text and `TaskFlagMarker` first in the right-hand badge cluster. The text keeps the id the action group is described by, alone, and is now `min-w-0 wrap-anywhere`. `accentClass`'s second parameter, passed "lapsed or overdue", is renamed from `flagged` to `datePassed`.
+- **Dashboard row** (`DashboardTaskRow`) — the same placement; `HomeDashboardTask` gains the required `flagged` and `icon` the backend already sent; the text is `wrap-anywhere`.
+- **Test support:** `TestDataManager.setTaskFlagAndIcon`, which `task-activity-history.spec.ts` now uses.
+- No backend, MCP or history change.
+
+**Tests:**
+- **Unit / RTL:** `TaskIconMarker.test.tsx`; `JournalTaskRow.test.tsx` and `DashboardTaskRow.test.tsx` (icon with its name, or none; *Flagged* or not; the described-by text is the task text alone); `TaskRow.test.tsx` unchanged. Every `HomeDashboardTask` fixture states the new fields.
+- **E2E** (Firefox and Mobile Chrome): `journal-tasks.spec.ts` › *flag and icon* — a seeded flagged task with the tent icon shows both on its journal row and an unflagged one neither, at 390px with a long unbroken text, no horizontal scroll and no page errors; `home-dashboard.spec.ts` › *tasks card* — the same on its dashboard row at mobile width.
+- **Backend:** none added; `TestFlagAndIconOnAnyTask` and `TestARowCarriesItsFlagIconListAndOverdue` already cover the wire.
+
+**Decisions:**
+- **User decision in plan review: display only.** Editing belongs on the task details panel (the canvas *Task details*), so Phase 15 opens it from journal rows too; that criterion moved there and Phase 15 was re-estimated.
+- **User decision in plan review: the rows stay separate components, sharing parts** ("go with A but we might need to revisit"). The canvas draws two idioms — a journal's own tasks and the dashboard's are the bordered card row, a list's are the divider-list *Task row* — and the journal row carries actions and journal-only tasks `TaskRow` refuses. ITER21-005 Phase 6 moves associated lists' tasks onto `TaskRow`. **Considered and deferred:** one row component with card and list variants for all three surfaces — touching `TaskRow`, `JournalTaskRow`, `JournalTaskActions`, `DashboardTaskRow`, `TasksCard`'s actions slot and their seven RTL files, roughly 800–1,000 lines as a ticket of its own. Revisit from here if the surfaces drift.
+- **Placement matches the list row:** the icon before the text; the flag right of it, ahead of the row's other markers. The accent bar is unchanged; the marker is the distinction.
+- **E2E in the surfaces' own specs**, not `task-lists.spec.ts` (Phase 4's to create), following Phase 2's precedent.
+
+**Notes for later phases:**
+- *Phase 15:* see its notes — the trigger, one non-empty PATCH, the Sheet width, the switch's hit area, the picker's Enter, the E2E's home.
+- *Phase 19:* withhold the details trigger (Phase 15) with the status actions on archived-list rows; the markers stay.
+- *ITER21-004 Phase 2:* list-task dashboard rows already draw the icon and flag.
 
 #### Phase 19: Archived and list labels on journal and contact pages
 

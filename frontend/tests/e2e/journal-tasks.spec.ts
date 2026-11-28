@@ -1096,6 +1096,65 @@ test.describe('Journal delete confirmation and list tasks', () => {
   });
 });
 
+/**
+ * A task's flag and icon on its journal row.
+ *
+ * Seeded through the API: nothing on the journal page sets them, since the
+ * editor is the task details panel. What is proved here is that the
+ * attributes a real journal listing sends reach the row, end to end.
+ */
+test.describe('Journal Task Surface — flag and icon', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('shows a flagged task’s flag and icon on its row, and still fits a phone', async ({
+    authenticatedPage,
+    testCleanup,
+  }) => {
+    const page = authenticatedPage;
+    const dataManager = new TestDataManager(page);
+    testCleanup(async () => await dataManager.cleanup());
+
+    const [creating, due] = await dataManager.createTaskAnchorJournals('Flag');
+    // One unbroken word longer than the phone is wide: the icon and the flag
+    // beside it must not widen the row past the screen.
+    const text = taskText(`Pack${'thetentpolesandpegs'.repeat(4)}`);
+    const flagged = await dataManager.createTask({
+      creatingJournalId: creating.id,
+      dueJournalId: due.id,
+      text,
+    });
+    const plain = await dataManager.createTask({
+      creatingJournalId: creating.id,
+      dueJournalId: due.id,
+      text: taskText('Charge the head torch'),
+    });
+    await dataManager.setTaskFlagAndIcon(flagged.id, {
+      flagged: true,
+      icon: 'tent',
+    });
+
+    const pageErrors: Error[] = [];
+    page.on('pageerror', error => pageErrors.push(error));
+
+    await openJournal(page, creating);
+
+    const row = page
+      .getByTestId('journal-tasks-group-created')
+      .getByTestId(`journal-task-${flagged.id}`);
+    await expect(row.getByTestId('journal-task-icon')).toHaveText('Tent icon');
+    await expect(row.getByRole('img', { name: 'Flagged' })).toBeVisible();
+
+    const plainRow = page
+      .getByTestId('journal-tasks-group-created')
+      .getByTestId(`journal-task-${plain.id}`);
+    await expect(plainRow.getByTestId('journal-task-text')).toBeVisible();
+    await expect(plainRow.getByTestId('journal-task-icon')).toHaveCount(0);
+    await expect(plainRow.getByRole('img', { name: 'Flagged' })).toHaveCount(0);
+
+    await expectFitsPhoneWithoutErrors(page, pageErrors);
+  });
+});
+
 test.describe('Task fixture dates', () => {
   test('are whole UTC days from today, not local wall-clock times', async () => {
     const today = new Date(utcDayOffset(0));

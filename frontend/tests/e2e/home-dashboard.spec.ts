@@ -1610,6 +1610,8 @@ function mockTask(taskId: number, daysAway: number): HomeDashboardTask {
     contacts: [
       { contact_id: taskId + 2000, name: 'Mocked Contact', photo_url: null },
     ],
+    flagged: false,
+    icon: null,
   };
 }
 
@@ -1632,6 +1634,40 @@ function expectedShortDueLabel(day: string): string {
 }
 
 test.describe('Home Dashboard — the tasks card', () => {
+  test('shows a flagged task’s flag and icon on its row, overflowing nothing at mobile width', async ({
+    authenticatedPage: page,
+    testCleanup,
+  }) => {
+    const dataManager = new TestDataManager(page);
+    testCleanup(() => dataManager.cleanup());
+    const day = await anchorDay(page);
+
+    const { task } = await createDashboardTask(
+      dataManager,
+      day,
+      `Tasks card pack${'thetentpolesandpegs'.repeat(4)}`
+    );
+    await dataManager.setTaskFlagAndIcon(task.id, {
+      flagged: true,
+      icon: 'tent',
+    });
+
+    await page.setViewportSize(MOBILE);
+    await openDashboard(page);
+
+    const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
+    await expect(row.getByTestId('dashboard-task-icon')).toHaveText(
+      'Tent icon'
+    );
+    await expect(row.getByRole('img', { name: 'Flagged' })).toBeVisible();
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+
   test('ticks a task off in place, without leaving the page (W24)', async ({
     authenticatedPage: page,
     testCleanup,
