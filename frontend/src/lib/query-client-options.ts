@@ -9,6 +9,9 @@
 
 import type { DefaultOptions } from '@tanstack/react-query';
 
+/** How many times a failed read is retried before its error shows. */
+export const DEFAULT_QUERY_RETRIES = 3;
+
 export const QUERY_CLIENT_DEFAULT_OPTIONS: DefaultOptions = {
   queries: {
     // Stale time: 5 minutes for most data
@@ -16,7 +19,7 @@ export const QUERY_CLIENT_DEFAULT_OPTIONS: DefaultOptions = {
     // Cache time: 10 minutes
     gcTime: 10 * 60 * 1000,
     // Retry failed requests 3 times
-    retry: 3,
+    retry: DEFAULT_QUERY_RETRIES,
     // Retry delay with exponential backoff
     retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
     // Refetch on window focus for fresh data

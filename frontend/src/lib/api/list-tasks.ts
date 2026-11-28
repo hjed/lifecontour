@@ -55,6 +55,7 @@ import {
   refreshTaskCollections,
   repaidSharedRefresh,
   reportFailure,
+  retryReadUnlessRefused,
   settleTaskWrite,
   TASK_WRITE,
   TaskApiError,
@@ -238,6 +239,7 @@ export function useTaskListOpenTasks(listId: string) {
     queryFn: () => fetchOpenTasks(listId),
     enabled: !!listId,
     staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: retryReadUnlessRefused,
   });
 }
 

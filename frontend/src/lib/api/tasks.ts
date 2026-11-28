@@ -56,6 +56,7 @@ import {
   SUCCESS_MESSAGES,
 } from '@/lib/constants';
 import { statusChangeWording } from '@/lib/task-display';
+import { DEFAULT_QUERY_RETRIES } from '@/lib/query-client-options';
 import { invalidateAfterMutation } from './invalidate-after-mutation';
 // From `./journal-keys`, never from `./journals`. This module is imported *by*
 // the journal client, so reaching back into it would close a runtime cycle that
@@ -1222,6 +1223,33 @@ export function settleTaskWrite(
  * there is worth riding out.
  */
 export const NO_RETRY = { retry: false } as const;
+
+/** Client errors that say "not now" rather than "no", so worth another try. */
+const TRANSIENT_CLIENT_ERRORS: ReadonlySet<number> = new Set([408, 429]);
+
+function isRefusal(error: Error): boolean {
+  return (
+    error instanceof TaskApiError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    !TRANSIENT_CLIENT_ERRORS.has(error.status)
+  );
+}
+
+/**
+ * Retry a read's server or network failure, never its refusal.
+ *
+ * A 4xx is the answer, not a hiccup: a list that is missing or not the user's
+ * is refused again on every attempt, and the default's backoff would hold the
+ * page on its skeleton for seven seconds before saying so. A timeout or rate
+ * limit is retried like a server failure.
+ */
+export function retryReadUnlessRefused(
+  failureCount: number,
+  error: Error
+): boolean {
+  return !isRefusal(error) && failureCount < DEFAULT_QUERY_RETRIES;
+}
 
 /**
  * The mutation key every task write carries, and the only thing that makes a
