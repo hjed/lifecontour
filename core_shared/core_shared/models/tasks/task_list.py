@@ -151,6 +151,76 @@ class TaskListSummary:
 
 
 @dataclass(frozen=True, kw_only=True)
+class TaskListPageWindow:
+    """One page of a listing: at most ``limit`` lists after skipping ``offset``.
+
+    Attributes:
+        limit: The page size, at least 1
+        offset: How many matching lists come before the page, at least 0
+    """
+
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class TaskListListing:
+    """What a listing of a user's lists asks for.
+
+    Attributes:
+        archived: Which lists by archived state; it also decides the order
+        name_contains: Only lists whose name contains this, ignoring case.
+            Trimmed on construction; blank, or longer than any list name can
+            be, is refused.
+        page: The page to return, or ``None`` for every matching list
+    """
+
+    archived: TaskListArchiveFilter
+    name_contains: str | None = None
+    page: TaskListPageWindow | None = None
+
+    def __post_init__(self) -> None:
+        if self.name_contains is None:
+            return
+        trimmed = self.name_contains.strip()
+        if not trimmed:
+            raise TaskListValidationError("name", "A name filter cannot be blank")
+        if len(trimmed) > MAX_TASK_LIST_NAME_LENGTH:
+            raise TaskListValidationError(
+                "name",
+                f"A name filter must be at most {MAX_TASK_LIST_NAME_LENGTH} characters",
+            )
+        object.__setattr__(self, "name_contains", trimmed)
+
+
+@dataclass(frozen=True, kw_only=True)
+class TaskListPage:
+    """The lists a listing matched, with how many match across every page.
+
+    Attributes:
+        task_lists: The lists on this page, in the listing's order
+        total: How many lists the listing matches across every page, reported
+            even for a page past the end
+    """
+
+    task_lists: tuple[TaskList, ...]
+    total: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class TaskListSummaryPage:
+    """A :class:`TaskListPage` with each list's open-task count.
+
+    Attributes:
+        summaries: The lists on this page with their counts, in order
+        total: As :attr:`TaskListPage.total`
+    """
+
+    summaries: tuple[TaskListSummary, ...]
+    total: int
+
+
+@dataclass(frozen=True, kw_only=True)
 class TaskListDeletion:
     """What deleting a list did to its tasks.
 

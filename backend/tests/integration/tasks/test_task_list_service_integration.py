@@ -30,6 +30,7 @@ from core_shared.models.tasks import (
     TaskListArchiveFilter,
     TaskListBusyError,
     TaskListDeletion,
+    TaskListListing,
     TaskListNotFoundError,
     TaskListValidationError,
     TaskNotFoundError,
@@ -1004,9 +1005,14 @@ class TestUnarchiveTaskList:
             middle.position,
         )
         active = await make_read_service(async_connection).list_task_lists(
-            user_id=USER_ID, archived=TaskListArchiveFilter.ACTIVE
+            user_id=USER_ID,
+            listing=TaskListListing(archived=TaskListArchiveFilter.ACTIVE),
         )
-        assert [each.task_list.id for each in active] == [first.id, middle.id, last.id]
+        assert [each.task_list.id for each in active.summaries] == [
+            first.id,
+            middle.id,
+            last.id,
+        ]
         assert (await _row(async_connection, middle.id))["archived_at"] is None
 
     @pytest.mark.asyncio
@@ -1154,9 +1160,9 @@ class TestListTaskLists:
 
         async def names(archived_filter: TaskListArchiveFilter) -> list[str]:
             lists = await service.list_task_lists(
-                user_id=USER_ID, archived=archived_filter
+                user_id=USER_ID, listing=TaskListListing(archived=archived_filter)
             )
-            return [each.task_list.name for each in lists]
+            return [each.task_list.name for each in lists.summaries]
 
         assert await names(TaskListArchiveFilter.ACTIVE) == [first.name, second.name]
         assert await names(TaskListArchiveFilter.ARCHIVED) == [archived.name]
@@ -1182,10 +1188,11 @@ class TestListTaskLists:
         )
 
         lists = await make_read_service(async_connection).list_task_lists(
-            user_id=USER_ID, archived=archived_filter
+            user_id=USER_ID, listing=TaskListListing(archived=archived_filter)
         )
 
-        assert lists == []
+        assert lists.summaries == ()
+        assert lists.total == 0
 
 
 class TestWiring:

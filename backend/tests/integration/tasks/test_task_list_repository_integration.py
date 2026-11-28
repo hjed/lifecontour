@@ -27,7 +27,10 @@ from core_shared.models.tasks import (
     TaskList,
     TaskListArchiveFilter,
     TaskListBusyError,
+    TaskListListing,
     TaskListNotFoundError,
+    TaskListPage,
+    TaskListPageWindow,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -98,6 +101,15 @@ async def set_position(
         text("UPDATE task_lists SET position = :position WHERE id = :list_id"),
         {"position": position, "list_id": task_list.id},
     )
+
+
+async def list_lists(
+    repository: SqlTaskListRepository,
+    archived: TaskListArchiveFilter = TaskListArchiveFilter.ACTIVE,
+) -> list[TaskList]:
+    """Every one of the user's lists for one archived filter, unpaged."""
+    page = await repository.list_for_user(USER_ID, TaskListListing(archived=archived))
+    return list(page.task_lists)
 
 
 def ids(task_lists: list[TaskList]) -> list[int | None]:
@@ -405,7 +417,7 @@ class TestListForUser:
         await set_position(async_connection, first, 2)
         await set_position(async_connection, third, 0)
 
-        listed = await repository.list_for_user(USER_ID)
+        listed = await list_lists(repository)
 
         assert ids(listed) == ids([third, second, first])
 
@@ -422,20 +434,17 @@ class TestListForUser:
         second = await save_list(repository, "Packing")
         await set_position(async_connection, first, 1)
 
-        listed = await repository.list_for_user(USER_ID)
+        listed = await list_lists(repository)
 
         assert ids(listed) == ids([first, second])
 
-    async def test_active_is_the_default_and_leaves_archived_lists_out(
+    async def test_active_leaves_archived_lists_out(
         self, repository: SqlTaskListRepository
     ) -> None:
         active = await save_list(repository, "Groceries")
         await save_list(repository, "Old trip", archived_at=ARCHIVED_EARLIER)
 
-        assert ids(await repository.list_for_user(USER_ID)) == ids([active])
-        assert ids(
-            await repository.list_for_user(USER_ID, TaskListArchiveFilter.ACTIVE)
-        ) == ids([active])
+        assert ids(await list_lists(repository)) == ids([active])
 
     async def test_archived_lists_come_most_recently_archived_first(
         self,
@@ -451,7 +460,7 @@ class TestListForUser:
         await set_position(async_connection, earlier, 1)
         await set_position(async_connection, later, 2)
 
-        listed = await repository.list_for_user(USER_ID, TaskListArchiveFilter.ARCHIVED)
+        listed = await list_lists(repository, TaskListArchiveFilter.ARCHIVED)
 
         assert ids(listed) == ids([later, earlier])
 
@@ -465,7 +474,7 @@ class TestListForUser:
         await set_position(async_connection, archived, 1)
         await set_position(async_connection, active, 0)
 
-        listed = await repository.list_for_user(USER_ID, TaskListArchiveFilter.ALL)
+        listed = await list_lists(repository, TaskListArchiveFilter.ALL)
 
         assert ids(listed) == ids([active, archived])
 
@@ -483,7 +492,181 @@ class TestListForUser:
             archived_at=ARCHIVED_EARLIER,
         )
 
-        assert await repository.list_for_user(USER_ID, archived) == []
+        assert await list_lists(repository, archived) == []
+
+
+def names(page: TaskListPage) -> list[str]:
+    return [task_list.name for task_list in page.task_lists]
+
+
+async def list_page(
+    repository: SqlTaskListRepository,
+    archived: TaskListArchiveFilter,
+    *,
+    name: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> TaskListPage:
+    window = None if limit is None else TaskListPageWindow(limit=limit, offset=offset)
+    return await repository.list_for_user(
+        USER_ID, TaskListListing(archived=archived, name_contains=name, page=window)
+    )
+
+
+class TestListingByName:
+    """The archived page's filter: a case-insensitive part of the name."""
+
+    async def test_matches_any_part_of_the_name_ignoring_case(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        await save_list(repository, "Packing for Bali")
+        await save_list(repository, "Groceries")
+        await save_list(repository, "Backpack repairs")
+
+        page = await list_page(repository, TaskListArchiveFilter.ACTIVE, name="PACK")
+
+        assert names(page) == ["Packing for Bali", "Backpack repairs"]
+        assert page.total == 2
+
+    @pytest.mark.parametrize(
+        ("typed", "matched"),
+        [("50%", "50% off"), ("a_b", "a_b"), ("\\", "back\\slash")],
+    )
+    async def test_like_wildcards_typed_by_the_user_match_literally(
+        self, repository: SqlTaskListRepository, typed: str, matched: str
+    ) -> None:
+        for name in ("50% off", "500 club", "a_b", "axb", "back\\slash"):
+            await save_list(repository, name)
+
+        page = await list_page(repository, TaskListArchiveFilter.ACTIVE, name=typed)
+
+        assert names(page) == [matched]
+
+    @pytest.mark.parametrize(
+        ("archived", "expected"),
+        [
+            (TaskListArchiveFilter.ACTIVE, ["Pack open"]),
+            (TaskListArchiveFilter.ARCHIVED, ["Pack later", "Pack earlier"]),
+            (TaskListArchiveFilter.ALL, ["Pack earlier", "Pack open", "Pack later"]),
+        ],
+    )
+    async def test_the_filter_narrows_each_archived_filter_in_its_order(
+        self,
+        repository: SqlTaskListRepository,
+        archived: TaskListArchiveFilter,
+        expected: list[str],
+    ) -> None:
+        await save_list(repository, "Pack earlier", archived_at=ARCHIVED_EARLIER)
+        await save_list(repository, "Pack open")
+        await save_list(repository, "Pack later", archived_at=ARCHIVED_LATER)
+        await save_list(repository, "Groceries")
+        await save_list(repository, "Old trip", archived_at=ARCHIVED_LATER)
+
+        page = await list_page(repository, archived, name="pack")
+
+        assert names(page) == expected
+
+
+class TestListingInPages:
+    """Paging cuts the filter's own order, and reports the total throughout."""
+
+    async def test_archived_pages_follow_the_archived_order_across_a_tie(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        """Two lists archived at the same instant are ordered by the newer id,
+        so a tie can neither repeat nor drop a list at a page boundary."""
+        await save_list(repository, "A", archived_at=ARCHIVED_EARLIER)
+        await save_list(repository, "B", archived_at=ARCHIVED_LATER)
+        await save_list(repository, "C", archived_at=ARCHIVED_LATER)
+        await save_list(repository, "D", archived_at=ARCHIVED_EARLIER)
+        await save_list(repository, "E", archived_at=ARCHIVED_LATER)
+        archived = TaskListArchiveFilter.ARCHIVED
+
+        pages = [
+            await list_page(repository, archived, limit=2, offset=offset)
+            for offset in (0, 2, 4)
+        ]
+
+        assert [names(page) for page in pages] == [["E", "C"], ["B", "D"], ["A"]]
+        assert [page.total for page in pages] == [5, 5, 5]
+
+    async def test_active_pages_follow_the_users_order(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        first = await save_list(repository, "First")
+        await save_list(repository, "Second")
+        third = await save_list(repository, "Third")
+        await set_position(async_connection, first, 5)
+        await set_position(async_connection, third, 0)
+        active = TaskListArchiveFilter.ACTIVE
+
+        pages = [
+            await list_page(repository, active, limit=2, offset=offset)
+            for offset in (0, 2)
+        ]
+
+        assert [names(page) for page in pages] == [["Third", "Second"], ["First"]]
+        assert [page.total for page in pages] == [3, 3]
+
+    async def test_the_total_counts_only_the_lists_the_filter_matches(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        for name in ("Pack 1", "Pack 2", "Pack 3", "Groceries"):
+            await save_list(repository, name, archived_at=ARCHIVED_EARLIER)
+
+        page = await list_page(
+            repository, TaskListArchiveFilter.ARCHIVED, name="pack", limit=2
+        )
+
+        assert len(page.task_lists) == 2
+        assert page.total == 3
+
+    async def test_a_page_past_the_end_is_empty_and_still_reports_the_total(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        await save_list(repository, "Old trip", archived_at=ARCHIVED_EARLIER)
+
+        page = await list_page(
+            repository, TaskListArchiveFilter.ARCHIVED, limit=20, offset=20
+        )
+
+        assert page == TaskListPage(task_lists=(), total=1)
+
+    async def test_an_unpaged_listing_is_every_list_in_one_statement(
+        self,
+        repository: SqlTaskListRepository,
+        async_connection: AsyncConnection,
+    ) -> None:
+        """The move answers with an unpaged listing inside its unit of work,
+        so it must not pay for a count it does not need."""
+        for name in ("A", "B", "C"):
+            await save_list(repository, name)
+
+        with recorded_statements(async_connection) as statements:
+            page = await list_page(repository, TaskListArchiveFilter.ACTIVE)
+
+        assert names(page) == ["A", "B", "C"]
+        assert page.total == 3
+        assert len(statements) == 1
+
+    async def test_another_users_matching_lists_are_neither_listed_nor_counted(
+        self, repository: SqlTaskListRepository
+    ) -> None:
+        mine = await save_list(repository, "Pack mine", archived_at=ARCHIVED_EARLIER)
+        await save_list(
+            repository,
+            "Pack theirs",
+            user_id=OTHER_USER_ID,
+            archived_at=ARCHIVED_LATER,
+        )
+
+        page = await list_page(
+            repository, TaskListArchiveFilter.ARCHIVED, name="pack", limit=20
+        )
+
+        assert page == TaskListPage(task_lists=(mine,), total=1)
 
 
 class TestDelete:
@@ -673,7 +856,7 @@ class TestReposition:
 
         await repository.reposition(USER_ID, [c.id, a.id, b.id])
 
-        lists = await repository.list_for_user(USER_ID, TaskListArchiveFilter.ALL)
+        lists = await list_lists(repository, TaskListArchiveFilter.ALL)
         assert ids(lists) == [c.id, a.id, b.id]
         assert [each.position for each in lists] == [0, 1, 2]
 
@@ -689,7 +872,7 @@ class TestReposition:
 
         await repository.reposition(USER_ID, [b.id, a.id])
 
-        lists = await repository.list_for_user(USER_ID)
+        lists = await list_lists(repository)
         assert [(each.id, each.position) for each in lists] == [(b.id, 0), (a.id, 1)]
 
     async def test_leaves_updated_at_alone(
@@ -768,7 +951,7 @@ class TestReposition:
 
         await repository.reposition(USER_ID, [])
 
-        assert ids(await repository.list_for_user(USER_ID)) == [mine.id]
+        assert ids(await list_lists(repository)) == [mine.id]
 
 
 class TestAssociatedJournal:
@@ -849,7 +1032,7 @@ class TestAssociatedJournal:
         assert stored.id is not None
         task_id = await create_list_task(async_connection, task_list_id=stored.id)
 
-        listed = await repository.list_for_user(USER_ID)
+        listed = await list_lists(repository)
         by_ids = await repository.find_by_ids([stored.id], USER_ID)
         for_tasks = await repository.find_for_tasks([task_id], USER_ID)
         for_update = await repository.find_by_id_for_update(stored.id, USER_ID)

@@ -17,7 +17,11 @@ Another user's list is answered exactly as a missing one, and every
 from typing import Annotated
 
 from core_shared.models.history import Provenance
-from core_shared.models.tasks import TaskListArchiveFilter, TaskListValidationError
+from core_shared.models.tasks import (
+    TaskListArchiveFilter,
+    TaskListListing,
+    TaskListValidationError,
+)
 from dishka import FromDishka
 from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Query, Request, status
@@ -113,12 +117,14 @@ async def list_task_lists(
     Raises:
         400: An unknown ``archived`` value.
     """
-    summaries = await task_list_read_service.list_task_lists(
-        user_id=user.id, archived=archived
+    listed = await task_list_read_service.list_task_lists(
+        user_id=user.id, listing=TaskListListing(archived=archived)
     )
     base_url = get_request_base_url(request)
     return TaskListSummaryCollectionResponse(
-        data=[to_task_list_summary_resource(each, base_url) for each in summaries]
+        data=[
+            to_task_list_summary_resource(each, base_url) for each in listed.summaries
+        ]
     )
 
 

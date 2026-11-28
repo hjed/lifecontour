@@ -3325,8 +3325,9 @@ picker's own behaviour, so they need only test it in context.
 - [ ] Collapsed, paged, cancelled marked; reopen.
 - [ ] E2E: find under Completed.
 
-#### Phase 12: Archived listing: paging and name filter
+#### Phase 12: Archived listing: paging and name filter 🚧 IN PROGRESS
 
+**Status:** 🚧 IN PROGRESS — delivered as a native stack of two PRs (user decision), each mergeable alone: (1) the listing value, repository filter and paging, and the read service; (2) the REST and MCP parameters with the frontend client hook.
 **Prerequisites:** ITER21-001.
 **Estimated diff:** ~80 production → **~700 tracked** · one capability on REST and MCP together
 

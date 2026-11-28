@@ -13,7 +13,9 @@ from core_shared.models.tasks import (
     TaskList,
     TaskListArchiveFilter,
     TaskListBusyError,
+    TaskListListing,
     TaskListNotFoundError,
+    TaskListPage,
 )
 from sqlalchemy import TextClause, text
 from sqlalchemy.exc import DBAPIError
@@ -164,32 +166,29 @@ _REPOSITION = text(
     """
 )
 
-_LIST_QUERIES = {
-    TaskListArchiveFilter.ACTIVE: text(
-        f"""
-        SELECT {_TASK_LIST_COLUMNS}
-        FROM task_lists
-        WHERE user_id = :user_id AND archived_at IS NULL
-        {_IN_USER_ORDER}
-        """
-    ),
-    TaskListArchiveFilter.ARCHIVED: text(
-        f"""
-        SELECT {_TASK_LIST_COLUMNS}
-        FROM task_lists
-        WHERE user_id = :user_id AND archived_at IS NOT NULL
-        ORDER BY archived_at DESC, id DESC
-        """
-    ),
-    TaskListArchiveFilter.ALL: text(
-        f"""
-        SELECT {_TASK_LIST_COLUMNS}
-        FROM task_lists
-        WHERE user_id = :user_id
-        {_IN_USER_ORDER}
-        """
-    ),
+_ARCHIVE_CLAUSES = {
+    TaskListArchiveFilter.ACTIVE: "AND archived_at IS NULL",
+    TaskListArchiveFilter.ARCHIVED: "AND archived_at IS NOT NULL",
+    TaskListArchiveFilter.ALL: "",
 }
+
+# Archived lists come most recently archived first, the order the archived page
+# groups by; the id breaks a tie on the instant, so pages never overlap.
+_LISTING_ORDERS = {
+    TaskListArchiveFilter.ACTIVE: _IN_USER_ORDER,
+    TaskListArchiveFilter.ARCHIVED: "ORDER BY archived_at DESC, id DESC",
+    TaskListArchiveFilter.ALL: _IN_USER_ORDER,
+}
+
+_NAME_CONTAINS = "AND name ILIKE :name_pattern ESCAPE '\\'"
+
+
+def _contains_pattern(fragment: str) -> str:
+    """An ``ILIKE`` pattern matching ``fragment`` anywhere, its own ``%``, ``_``
+    and ``\\`` taken literally."""
+    escaped = fragment.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
 
 # A delete's exclusive lock on the list, taken without waiting: the caller
 # already holds the list ``FOR SHARE`` and every task on it, so another holder
@@ -367,13 +366,40 @@ class SqlTaskListRepository(TaskListRepository):
         return {row.task_id: _row_to_task_list(row) for row in result.fetchall()}
 
     async def list_for_user(
-        self,
-        user_id: str,
-        archived: TaskListArchiveFilter = TaskListArchiveFilter.ACTIVE,
-    ) -> list[TaskList]:
-        """List the user's lists, filtered by archived state."""
-        result = await self.conn.execute(_LIST_QUERIES[archived], {"user_id": user_id})
-        return [_row_to_task_list(row) for row in result.fetchall()]
+        self, user_id: str, listing: TaskListListing
+    ) -> TaskListPage:
+        """List the user's lists for one listing: filtered, ordered, paged.
+
+        An unpaged listing is one statement and its total is its length; a
+        paged one counts separately, because a page past the end has no row to
+        carry a window total and must still report one.
+        """
+        where = f"WHERE user_id = :user_id {_ARCHIVE_CLAUSES[listing.archived]}"
+        params: dict[str, Any] = {"user_id": user_id}
+        if listing.name_contains is not None:
+            where = f"{where} {_NAME_CONTAINS}"
+            params["name_pattern"] = _contains_pattern(listing.name_contains)
+
+        select = (
+            f"SELECT {_TASK_LIST_COLUMNS} FROM task_lists {where} "
+            f"{_LISTING_ORDERS[listing.archived]}"
+        )
+        if listing.page is None:
+            result = await self.conn.execute(text(select), params)
+            task_lists = tuple(_row_to_task_list(row) for row in result.fetchall())
+            return TaskListPage(task_lists=task_lists, total=len(task_lists))
+
+        result = await self.conn.execute(
+            text(f"{select} LIMIT :limit OFFSET :offset"),
+            {**params, "limit": listing.page.limit, "offset": listing.page.offset},
+        )
+        total = await self.conn.execute(
+            text(f"SELECT COUNT(*) FROM task_lists {where}"), params
+        )
+        return TaskListPage(
+            task_lists=tuple(_row_to_task_list(row) for row in result.fetchall()),
+            total=int(total.scalar_one()),
+        )
 
     async def list_for_user_for_update(self, user_id: str) -> list[TaskList]:
         """Every one of the user's lists, archived included, locked against
