@@ -16,7 +16,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -30,6 +30,7 @@ from core_shared.models.tasks import (
     TaskListArchiveFilter,
     TaskListBusyError,
     TaskListDeletion,
+    TaskListJournalNotFoundError,
     TaskListListing,
     TaskListNotFoundError,
     TaskListValidationError,
@@ -438,6 +439,151 @@ class TestUpdateTaskList:
         )
 
         assert renamed.name == "Trip"
+
+
+class TestAssociateTaskList:
+    """Associating a list with a journal, changing it and removing it.
+
+    What needs the database is here: the stored column, the owner-scoped
+    journal read and the outbox row. The lock order and the refusal order are
+    pinned against mocked ports in ``tests/unit/tasks/test_task_list_service_update.py``.
+    """
+
+    @staticmethod
+    async def _associate(
+        conn: AsyncConnection, task_list_id: int, journal_id: int | None
+    ) -> TaskList:
+        return await make_service(conn).update_task_list(
+            user_id=USER_ID,
+            task_list_id=task_list_id,
+            patch=TaskListPatch(associated_journal_id=journal_id),
+            transaction=conn,
+            source=Provenance.UI,
+            changed_by="ui",
+        )
+
+    @staticmethod
+    async def _journal(conn: AsyncConnection, *, user_id: str = USER_ID) -> int:
+        return await create_journal(
+            SqlJournalRepository(conn), title="Trip", days_offset=7, user_id=user_id
+        )
+
+    @pytest.mark.asyncio
+    async def test_associates_changes_and_removes_the_journal(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        first = await self._journal(async_connection)
+        second = await self._journal(async_connection)
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        steps = []
+        for journal_id in (first, second, None):
+            answered = await self._associate(async_connection, seeded.id, journal_id)
+            stored = (await _row(async_connection, seeded.id))["associated_journal_id"]
+            steps.append((answered.associated_journal_id, stored))
+
+        assert steps == [(first, first), (second, second), (None, None)]
+        events = await task_list_events(async_connection, task_list_id=seeded.id)
+        assert [event.payload["changed_fields"] for event in events] == [
+            {"associated_journal_id": [None, first]},
+            {"associated_journal_id": [first, second]},
+            {"associated_journal_id": [second, None]},
+        ]
+        assert {event.payload["source"] for event in events} == {"ui"}
+
+    @pytest.mark.asyncio
+    async def test_a_journal_holds_several_lists(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await self._journal(async_connection)
+        ids = []
+        for name in ("Packing", "Prep"):
+            seeded = await seed_task_list(async_connection, name)
+            assert seeded.id is not None
+            await self._associate(async_connection, seeded.id, journal_id)
+            ids.append(seeded.id)
+
+        assert [
+            (await _row(async_connection, task_list_id))["associated_journal_id"]
+            for task_list_id in ids
+        ] == [journal_id, journal_id]
+
+    @pytest.mark.asyncio
+    async def test_the_lists_tasks_keep_their_own_dates(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        trip = await self._journal(async_connection)
+        meeting = await self._journal(async_connection)
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+        dated = await create_list_task(
+            async_connection, task_list_id=seeded.id, due_date=date(2027, 1, 4)
+        )
+        due_in_meeting = await create_list_task(
+            async_connection, task_list_id=seeded.id, due_journal_id=meeting
+        )
+        undated = await create_list_task(async_connection, task_list_id=seeded.id)
+        before = [
+            await _task_row(async_connection, task_id)
+            for task_id in (dated, due_in_meeting, undated)
+        ]
+
+        await self._associate(async_connection, seeded.id, trip)
+
+        assert [
+            await _task_row(async_connection, task_id)
+            for task_id in (dated, due_in_meeting, undated)
+        ] == before
+        assert await task_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_another_users_journal_is_refused_as_a_missing_one(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        theirs = await self._journal(async_connection, user_id=OTHER_USER_ID)
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        with pytest.raises(TaskListJournalNotFoundError) as refused:
+            await self._associate(async_connection, seeded.id, theirs)
+
+        assert refused.value.message == TaskListJournalNotFoundError(theirs).message
+        assert (await _row(async_connection, seeded.id))[
+            "associated_journal_id"
+        ] is None
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_journal_is_refused(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        seeded = await seed_task_list(async_connection, "Packing")
+        assert seeded.id is not None
+
+        with pytest.raises(TaskListJournalNotFoundError):
+            await self._associate(async_connection, seeded.id, 2_000_000_000)
+
+        assert (await _row(async_connection, seeded.id))[
+            "associated_journal_id"
+        ] is None
+        assert await task_list_events(async_connection) == []
+
+    @pytest.mark.asyncio
+    async def test_the_journal_it_already_has_records_nothing(
+        self, async_connection: AsyncConnection
+    ) -> None:
+        journal_id = await self._journal(async_connection)
+        seeded = await seed_task_list(
+            async_connection, "Packing", associated_journal_id=journal_id
+        )
+        assert seeded.id is not None
+        outbox_before = await count(async_connection, _COUNT_OUTBOX, {})
+
+        answered = await self._associate(async_connection, seeded.id, journal_id)
+
+        assert answered.associated_journal_id == journal_id
+        assert await count(async_connection, _COUNT_OUTBOX, {}) == outbox_before
 
 
 _COUNT_OUTBOX = "SELECT COUNT(*) FROM outbox_events"

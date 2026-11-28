@@ -68,6 +68,7 @@ class TaskProvider(Provider):
         self,
         task_list_repo: TaskListRepository,
         task_repo: TaskRepository,
+        journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
     ) -> TaskListService:
         """Provide the task list write service.
@@ -75,11 +76,13 @@ class TaskProvider(Provider):
         Its publisher is bound to the request connection the repositories hold,
         as ``TaskService``'s is, so a list write and its event share one unit
         of work. It takes the task repository too, because deleting a list
-        deletes or keeps its tasks in that same unit.
+        deletes or keeps its tasks in that same unit, and the journal
+        repository, because associating a list checks and locks its journal.
         """
         return TaskListService(
             task_list_repo=task_list_repo,
             task_repo=task_repo,
+            journal_repo=journal_repo,
             event_publisher=event_publisher,
         )
 

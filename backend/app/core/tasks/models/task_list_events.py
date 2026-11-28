@@ -96,8 +96,9 @@ class TaskListUpdated(DomainEvent):
     Archiving and unarchiving are another key of this type rather than a type
     of their own: ``archived_at``, an ISO instant or ``None`` — ``(None, ts)``
     archives and ``(ts, None)`` unarchives. So is the journal association:
-    ``associated_journal_id``, a journal id or ``None``. A journal delete
-    publishes ``(deleted, None)`` for each list it leaves unassociated.
+    ``associated_journal_id``, a journal id or ``None``: ``(None, id)``
+    associates, ``(id, other)`` changes and ``(id, None)`` removes it. A journal
+    delete publishes ``(deleted, None)`` for each list it leaves unassociated.
 
     **Only what actually moved is named**: the service compares each requested
     value with the stored one, and a write that changes nothing publishes

@@ -85,6 +85,7 @@ class _Ports:
             task_list_repo=self.task_list_repo,
             event_publisher=self.event_publisher,
             task_repo=self.task_repo,
+            journal_repo=AsyncMock(),
         )
 
     def call_names(self) -> list[str]:

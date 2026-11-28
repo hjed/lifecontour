@@ -46,6 +46,7 @@ from core_shared.models.tasks import (
     TaskListArchivedError,
     TaskListBusyError,
     TaskListChangedConcurrentlyError,
+    TaskListJournalNotFoundError,
     TaskListNotFoundError,
     TaskListRemovalNeedsJournalsError,
     TaskListValidationError,
@@ -173,6 +174,7 @@ def create_domain_error_response(domain_error: DomainError) -> JsonApiErrorRespo
         # exact type, so the subclass needs its own entry to share the code.
         TaskListValidationError: "TASK_VALIDATION_ERROR",
         TaskListNotFoundError: "TASK_LIST_NOT_FOUND",
+        TaskListJournalNotFoundError: "TASK_LIST_JOURNAL_NOT_FOUND",
         TaskListArchivedError: "TASK_LIST_ARCHIVED",
         TaskListChangedConcurrentlyError: "TASK_LIST_CHANGED",
         # A list delete that met another writer: the same conflict and remedy.
