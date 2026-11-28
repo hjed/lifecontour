@@ -9,6 +9,8 @@ overrides one to stage a race or read what was published.
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
+from app.core.journal.models.repositories import JournalRepository
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.repositories import TaskListRepository, TaskRepository
@@ -21,6 +23,7 @@ def build_task_list_service(
     *,
     task_list_repo: TaskListRepository | None = None,
     task_repo: TaskRepository | None = None,
+    journal_repo: JournalRepository | None = None,
     event_publisher: OutboxEventPublisher | None = None,
 ) -> TaskListService:
     """A ``TaskListService`` over real adapters on ``connection``.
@@ -32,5 +35,6 @@ def build_task_list_service(
     return TaskListService(
         task_list_repo=task_list_repo or SqlTaskListRepository(connection),
         task_repo=task_repo or SqlTaskRepository(connection),
+        journal_repo=journal_repo or SqlJournalRepository(connection),
         event_publisher=event_publisher or OutboxEventPublisher(connection),
     )

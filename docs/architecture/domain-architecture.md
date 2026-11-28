@@ -520,7 +520,18 @@ the *creating* journal where it arose and the *due* journal where it matters.
   or `null` (`(null, ts)` archives, `(ts, null)` unarchives). The journal association travels as
   `associated_journal_id`, an integer journal id or `null`; a journal delete publishes
   `(deleted, null)` for each list it leaves unassociated (ITER21-005 Phase 2a) and a journal merge
-  `(absorbed, survivor)` for each list it moves (Phase 2c). Archive and unarchive are idempotent —
+  `(absorbed, survivor)` for each list it moves (Phase 2c). The user associates, changes and removes
+  it through the field update (Phase 3): `(null, id)`, `(id, other)`, `(id, null)`.
+  **Associating takes the journal before the list**: `TaskListService.update_task_list` holds the
+  journal it joins `FOR KEY SHARE` (`JournalRepository.find_and_lock_by_ids_for_user`, owner-scoped,
+  so somebody else's journal is never locked) and only then the list `FOR NO KEY UPDATE` — the
+  order a journal delete or merge takes, which holds the journal `FOR UPDATE` before any list, so
+  the two queue at the journal (`test_task_list_association_lock_order_integration.py`). The
+  journal being left is not locked: a delete or merge of it waits on the list row, then re-checks
+  `associated_journal_id` and skips the list. The refusals keep their own order — a list that is not
+  the user's (`TaskListNotFoundError`), an archived one (`TaskListArchivedError`), then an absent or
+  foreign journal (`TaskListJournalNotFoundError`, one message for both). Any of the owner's
+  journals may be associated, past, future or cancelled. Archive and unarchive are idempotent —
   a list already in the asked-for state is answered unchanged and nothing is published.
   **A list's history is projected from these events** (ITER21-001 Phase 7): the
   `history-projection` group subscribes to `TASK_LIST_EVENT_TYPES` and `HistoryService` files the

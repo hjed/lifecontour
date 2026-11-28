@@ -84,6 +84,30 @@ class TaskListNotFoundError(TaskDomainError):
         self.task_list_id = task_list_id
 
 
+class TaskListJournalNotFoundError(TaskDomainError):
+    """Exception raised when a list is associated with an unreachable journal.
+
+    A list may be associated only with a journal that exists **and** belongs to
+    the acting user. The two are one error, as for
+    :class:`TaskAnchorJournalNotFoundError`, because the journal is resolved by
+    a single owner-scoped read: somebody else's journal and one that never
+    existed produce a byte-identical message for the same id, so the refusal
+    cannot be used to probe for another user's journals.
+    """
+
+    def __init__(self, journal_id: int):
+        super().__init__(
+            f"Journal with ID {journal_id} not found. A list can only be "
+            f"associated with a journal that exists and belongs to you.",
+            404,
+        )
+        self.journal_id = journal_id
+
+    def error_meta(self) -> dict[str, Any]:
+        """The refused field, so a form marks its journal picker."""
+        return {"field": "associated_journal_id"}
+
+
 class TaskListArchivedError(TaskDomainError):
     """Exception raised when an archived task list is written to.
 

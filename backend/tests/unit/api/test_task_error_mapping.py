@@ -20,6 +20,7 @@ from core_shared.models.tasks import (
     TaskListArchivedError,
     TaskListBusyError,
     TaskListChangedConcurrentlyError,
+    TaskListJournalNotFoundError,
     TaskListRemovalNeedsJournalsError,
     TaskNotFoundError,
     TaskReopenNotAcknowledgedError,
@@ -258,3 +259,28 @@ class TestABusyListIsARetryableConflict:
         assert error.task_list_id == 12
         assert "Task list 12" in error.message
         assert "retry" in error.message.lower()
+
+
+@pytest.mark.unit
+class TestAnUnreachableAssociatedJournalIsTellableApart:
+    """A list's journal that is missing or somebody else's is a 404 of its own,
+    naming the field, so the picker that chose it can be marked rather than the
+    list being reported as missing."""
+
+    def test_it_has_its_own_code_and_names_the_field(self) -> None:
+        response = create_domain_error_response(TaskListJournalNotFoundError(31))
+
+        error = response.errors[0]
+        assert error.code == "TASK_LIST_JOURNAL_NOT_FOUND"
+        assert error.status == "404"
+        assert "31" in (error.detail or "")
+        assert error.meta == {"field": "associated_journal_id"}
+
+    def test_its_message_says_nothing_about_whose_journal_it_is(self) -> None:
+        error = TaskListJournalNotFoundError(31)
+
+        assert error.journal_id == 31
+        assert error.message == (
+            "Journal with ID 31 not found. A list can only be associated with "
+            "a journal that exists and belongs to you."
+        )

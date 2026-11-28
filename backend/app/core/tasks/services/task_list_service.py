@@ -6,7 +6,8 @@ back together. Reads live in :class:`TaskListReadService`, which takes no event
 publisher and opens no unit of work — the same split ``TaskService`` and
 ``TaskReadService`` make.
 
-Creation, the field update (rename, set or clear the icon), reordering,
+Creation, the field update (rename, set or clear the icon, associate the list
+with a journal, change or remove that association), reordering,
 archiving and unarchiving, and deletion live here. Every write locks what it reads inside its
 unit of work before writing: the field update and the archive pair their one
 list with ``find_by_id_for_update``, a move all the owner's lists. Reordering is
@@ -28,12 +29,14 @@ from core_shared.models.tasks import (
     TaskList,
     TaskListArchiveFilter,
     TaskListDeletion,
+    TaskListJournalNotFoundError,
     TaskListListing,
     TaskListNotFoundError,
     reorder_task_lists,
 )
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.core.journal.models.repositories import JournalRepository
 from app.core.tasks.models.events import TaskDeleted, TaskListMembershipChanged
 from app.core.tasks.models.repositories import TaskListRepository, TaskRepository
 from app.core.tasks.models.task_list_events import (
@@ -53,17 +56,20 @@ class TaskListService:
 
     Every write but a move announces itself. The task repository is here for
     the delete alone, which deletes or keeps the list's tasks in its own unit
-    of work.
+    of work; the journal repository for the association alone, which checks
+    and locks the journal a list joins.
     """
 
     def __init__(
         self,
         task_list_repo: TaskListRepository,
         task_repo: TaskRepository,
+        journal_repo: JournalRepository,
         event_publisher: OutboxEventPublisher,
     ) -> None:
         self.task_list_repo = task_list_repo
         self.task_repo = task_repo
+        self.journal_repo = journal_repo
         self.event_publisher = event_publisher
 
     @transactional
@@ -116,7 +122,8 @@ class TaskListService:
         source: Provenance = Provenance.SYSTEM,
         changed_by: str = "system",
     ) -> TaskList:
-        """Rename a list, set or clear its icon, or both, as one change.
+        """Rename a list, set or clear its icon, associate it with a journal or
+        change or remove that association — any of them, as one change.
 
         **The read takes a row lock** and the patch is applied to the list as
         read under it, so two overlapping updates serialise and neither can
@@ -135,14 +142,29 @@ class TaskListService:
         refusal comes before the comparison, because read-only means "not
         writable", not "unchanged".
 
+        **A journal the list joins is locked before the list.** It is held
+        ``FOR KEY SHARE`` — the weakest lock a journal delete or merge still
+        waits behind — and those take the journal ``FOR UPDATE`` before they
+        touch any list, so the two queue at the journal instead of
+        deadlocking. The journal being left is not locked: a delete or merge of
+        it waits on this list's row, then skips a list no longer associated with
+        it. The refusals keep their own order whatever the lock order: a list
+        that is not the user's, then an archived one, then the journal.
+
         Raises:
             TaskListValidationError: The new name is blank or too long.
             TaskListNotFoundError: The list does not exist or is not the acting
                 user's; the two are indistinguishable by design.
             TaskListArchivedError: The list is archived, and so read-only.
+            TaskListJournalNotFoundError: The journal to associate does not
+                exist or is not the acting user's.
         """
+        joining_found = await self._lock_associated_journal(user_id, patch)
         stored = await self._locked(user_id, task_list_id)
         stored.ensure_writable()
+        if not joining_found:
+            assert isinstance(patch.associated_journal_id, int)
+            raise TaskListJournalNotFoundError(patch.associated_journal_id)
 
         changed_fields = _changed_fields(stored, patch)
         if not changed_fields:
@@ -353,6 +375,23 @@ class TaskListService:
         )
         return released
 
+    async def _lock_associated_journal(
+        self, user_id: str, patch: TaskListPatch
+    ) -> bool:
+        """Hold the journal ``patch`` associates the list with, if it names one.
+
+        ``False`` only when it names a journal that is absent or somebody
+        else's: the read is owner-scoped, so such a journal is never locked.
+        The caller decides when that is refused, after the list's own refusals.
+        """
+        journal_id = patch.associated_journal_id
+        if not isinstance(journal_id, int):
+            return True
+        locked = await self.journal_repo.find_and_lock_by_ids_for_user(
+            user_id, [journal_id]
+        )
+        return any(journal.id == journal_id for journal in locked)
+
     async def _locked(self, user_id: str, task_list_id: int) -> TaskList:
         """The owner's list read under its row lock, or not found."""
         stored = await self.task_list_repo.find_by_id_for_update(task_list_id, user_id)
@@ -409,15 +448,19 @@ def _iso(instant: datetime | None) -> str | None:
     return instant.isoformat() if instant is not None else None
 
 
-def _wire(value: object) -> str | None:
-    """A field value as the event payload carries it: a plain string or null.
+def _wire(value: object) -> str | int | None:
+    """A field value as the event payload carries it: a plain string, a journal
+    id, or null.
 
     ``TaskIcon`` is checked first: it is a ``StrEnum``, so it is also a ``str``,
-    and the payload must hold the bare key rather than the member.
+    and the payload must hold the bare key rather than the member. ``bool`` is
+    refused although it is an ``int``: no list field is one.
     """
     if isinstance(value, TaskIcon):
         return value.value
     if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
         return value
     raise TypeError(f"No wire form for a task list field value: {value!r}")
 
