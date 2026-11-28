@@ -9,14 +9,21 @@ and a timezone, so those invariants live in the service layer.
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
+from uuid import UUID
 
 import pytest
 from core_shared.models.tasks import (
+    IntervalRecurrence,
+    NoDateRecurrence,
+    RecurrenceInterval,
+    RecurrenceIntervalUnit,
+    SeriesRecurrence,
     Task,
     TaskAnchorMissingError,
     TaskDomainError,
     TaskIcon,
     TaskJournalAnchor,
+    TaskRecurrence,
     TaskStatus,
     TaskValidationError,
 )
@@ -423,3 +430,79 @@ class TestRequireAnchor:
         assert exc_info.value.task_id == 42
         assert exc_info.value.anchor == anchor
         assert not isinstance(exc_info.value, TaskDomainError)
+
+
+_SERIES_RECURRENCE = SeriesRecurrence(series_id=UUID(int=7))
+_RECURRENCES: list[TaskRecurrence] = [
+    NoDateRecurrence(),
+    IntervalRecurrence(
+        interval=RecurrenceInterval(count=2, unit=RecurrenceIntervalUnit.WEEK)
+    ),
+    _SERIES_RECURRENCE,
+]
+
+
+@pytest.mark.unit
+class TestRecurrence:
+    """Invariant 6, its list half: only a list task recurs."""
+
+    def test_a_task_does_not_recur_by_default(self) -> None:
+        task = _list_task()
+
+        assert task.recurrence is None
+        assert task.recurrence_of_task_id is None
+
+    @pytest.mark.parametrize("recurrence", _RECURRENCES)
+    def test_a_list_task_accepts_each_mode(self, recurrence: TaskRecurrence) -> None:
+        assert _list_task(recurrence=recurrence).recurrence == recurrence
+
+    def test_a_journal_only_task_cannot_recur(self) -> None:
+        with pytest.raises(TaskValidationError) as exc_info:
+            _task(recurrence=NoDateRecurrence())
+
+        assert exc_info.value.field == "recurrence"
+
+    def test_a_bare_mode_string_is_refused(self) -> None:
+        """Surfaces parse into a value object first, as they do for the icon."""
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(recurrence="no_date")
+
+        assert exc_info.value.field == "recurrence"
+
+    def test_leaving_the_list_while_recurring_is_refused(self) -> None:
+        """``replace`` re-validates, so a recurring task cannot drop its list."""
+        task = _list_task(
+            recurrence=NoDateRecurrence(),
+            creating_journal_id=CREATING_JOURNAL_ID,
+            due_journal_id=DUE_JOURNAL_ID,
+        )
+
+        with pytest.raises(TaskValidationError) as exc_info:
+            replace(task, task_list_id=None, position=None)
+
+        assert exc_info.value.field == "recurrence"
+
+
+@pytest.mark.unit
+class TestRecurrenceOf:
+    """The task a copy was made from: a past, not a setting."""
+
+    def test_a_copy_records_its_original(self) -> None:
+        assert _list_task(recurrence_of_task_id=41).recurrence_of_task_id == 41
+
+    def test_a_journal_only_task_may_record_its_original(self) -> None:
+        """Not a setting, so it is not limited to list tasks."""
+        assert _task(recurrence_of_task_id=41).recurrence_of_task_id == 41
+
+    @pytest.mark.parametrize("invalid_id", [0, -1])
+    def test_a_non_positive_original_is_refused(self, invalid_id: int) -> None:
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(recurrence_of_task_id=invalid_id)
+
+        assert exc_info.value.field == "recurrence_of_task_id"
+
+    def test_a_task_is_never_a_copy_of_itself(self) -> None:
+        with pytest.raises(TaskValidationError) as exc_info:
+            _list_task(id=41, recurrence_of_task_id=41)
+
+        assert exc_info.value.field == "recurrence_of_task_id"

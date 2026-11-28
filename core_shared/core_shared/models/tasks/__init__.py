@@ -61,6 +61,16 @@ from .task_list import (
 )
 from .task_list_order import reorder_task_lists
 from .task_page import TaskListTasks, TaskPage, TaskReadModelPage
+from .task_recurrence import (
+    TASK_RECURRENCE_TYPES,
+    IntervalRecurrence,
+    NoDateRecurrence,
+    RecurrenceInterval,
+    RecurrenceIntervalUnit,
+    RecurrenceMode,
+    SeriesRecurrence,
+    TaskRecurrence,
+)
 from .task_status import TaskStatus, is_status_transition_allowed
 from .upcoming import (
     DEFAULT_UPCOMING_DAYS_AHEAD,
@@ -82,6 +92,13 @@ __all__ = [
     "JournalTaskGroups",
     "LapseReason",
     "ListTaskDue",
+    "TASK_RECURRENCE_TYPES",
+    "IntervalRecurrence",
+    "NoDateRecurrence",
+    "RecurrenceInterval",
+    "RecurrenceIntervalUnit",
+    "RecurrenceMode",
+    "SeriesRecurrence",
     "Task",
     "TaskAnchorJournalNotFoundError",
     "TaskAnchorMissingError",
@@ -118,6 +135,7 @@ __all__ = [
     "TaskPage",
     "TaskReadModel",
     "TaskReadModelPage",
+    "TaskRecurrence",
     "TaskReopenNotAcknowledgedError",
     "TaskStatus",
     "TaskStatusTransitionError",
