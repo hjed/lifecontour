@@ -25,6 +25,7 @@ from core_shared.models.tasks import (
     TaskIcon,
     TaskList,
     TaskListArchiveFilter,
+    TaskListListing,
     TaskListValidationError,
 )
 from fastmcp.tools import tool
@@ -245,8 +246,8 @@ async def list_task_lists(
     Each list carries open_task_count: how many of its tasks are not done.
     """
     user_id = await get_current_user_id()
-    summaries = await task_list_read_service.list_task_lists(
-        user_id=user_id, archived=archived
+    listed = await task_list_read_service.list_task_lists(
+        user_id=user_id, listing=TaskListListing(archived=archived)
     )
     return TaskListSummariesMCP(
         lists=[
@@ -254,7 +255,7 @@ async def list_task_lists(
                 **_task_list_fields(each.task_list).model_dump(),
                 open_task_count=each.open_task_count,
             )
-            for each in summaries
+            for each in listed.summaries
         ]
     )
 

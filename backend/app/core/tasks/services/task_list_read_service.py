@@ -10,16 +10,17 @@ reported exactly as a missing one.
 
 from core_shared.models.tasks import (
     TaskList,
-    TaskListArchiveFilter,
+    TaskListListing,
     TaskListNotFoundError,
     TaskListSummary,
+    TaskListSummaryPage,
 )
 
 from app.core.tasks.models.repositories import TaskListRepository, TaskRepository
 
 
 class TaskListReadService:
-    """Reads one list, or the owner's lists by archived state."""
+    """Reads one list, or a listing of the owner's lists."""
 
     def __init__(
         self, task_list_repo: TaskListRepository, task_repo: TaskRepository
@@ -40,26 +41,30 @@ class TaskListReadService:
         return found
 
     async def list_task_lists(
-        self, *, user_id: str, archived: TaskListArchiveFilter
-    ) -> list[TaskListSummary]:
-        """Return the user's lists for one archived filter, each with its
-        open-task count, in the order the repository defines for it: manual
-        order for ``ACTIVE`` and ``ALL``, most-recently-archived first for
-        ``ARCHIVED``.
+        self, *, user_id: str, listing: TaskListListing
+    ) -> TaskListSummaryPage:
+        """Return the user's lists for one listing, each with its open-task
+        count, in the order the repository defines for its archived filter:
+        manual order for ``ACTIVE`` and ``ALL``, most-recently-archived first
+        for ``ARCHIVED``.
 
-        The counts are one owner-scoped statement for the whole listing, and
-        a list with no open tasks — absent from the counts — reads as zero.
+        The counts are one owner-scoped statement for the listed page, and a
+        list with no open tasks — absent from the counts — reads as zero. The
+        total is every list the listing matches, across pages.
         """
-        task_lists = await self.task_list_repo.list_for_user(user_id, archived)
-        if not task_lists:
-            return []
+        page = await self.task_list_repo.list_for_user(user_id, listing)
+        if not page.task_lists:
+            return TaskListSummaryPage(summaries=(), total=page.total)
         # A listed list is persisted, so its id is always set.
-        list_ids = [task_list.id for task_list in task_lists if task_list.id]
+        list_ids = [task_list.id for task_list in page.task_lists if task_list.id]
         counts = await self.task_repo.count_open_tasks_by_list(list_ids, user_id)
-        return [
-            TaskListSummary(
-                task_list=task_list,
-                open_task_count=counts.get(task_list.id or 0, 0),
-            )
-            for task_list in task_lists
-        ]
+        return TaskListSummaryPage(
+            summaries=tuple(
+                TaskListSummary(
+                    task_list=task_list,
+                    open_task_count=counts.get(task_list.id or 0, 0),
+                )
+                for task_list in page.task_lists
+            ),
+            total=page.total,
+        )

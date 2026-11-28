@@ -34,8 +34,9 @@ from core_shared.models.tasks import (
     TaskJournalDetachment,
     TaskJournalRepointing,
     TaskList,
-    TaskListArchiveFilter,
     TaskListDeletion,
+    TaskListListing,
+    TaskListPage,
     TaskPage,
 )
 
@@ -1137,19 +1138,22 @@ class TaskListRepository(ABC):
 
     @abstractmethod
     async def list_for_user(
-        self,
-        user_id: str,
-        archived: TaskListArchiveFilter = TaskListArchiveFilter.ACTIVE,
-    ) -> list[TaskList]:
-        """List the user's lists, filtered by archived state.
+        self, user_id: str, listing: TaskListListing
+    ) -> TaskListPage:
+        """List the user's lists, filtered by archived state and name.
 
         Args:
             user_id: The acting user; nobody else's lists are ever returned
-            archived: ``ACTIVE`` (the default) or ``ALL`` in the user's order,
-                ``(position, id)``; ``ARCHIVED`` most-recently-archived first.
+                nor counted
+            listing: Which lists and which page. ``ACTIVE`` and ``ALL`` come in
+                the user's order, ``(position, id)``; ``ARCHIVED``
+                most-recently-archived first, ``(archived_at, id)`` descending.
+                The name filter matches any part of the name ignoring case,
+                with ``%``, ``_`` and ``\\`` matched literally.
 
         Returns:
-            The matching lists, possibly empty.
+            The page — every matching list when the listing is unpaged — and
+            the total across every page, reported even for a page past the end.
         """
 
     @abstractmethod

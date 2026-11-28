@@ -28,6 +28,7 @@ from core_shared.models.tasks import (
     TaskList,
     TaskListArchiveFilter,
     TaskListDeletion,
+    TaskListListing,
     TaskListNotFoundError,
     reorder_task_lists,
 )
@@ -197,9 +198,10 @@ class TaskListService:
         await self.task_list_repo.reposition(
             user_id, reorder_task_lists(locked, task_list_id, index)
         )
-        return await self.task_list_repo.list_for_user(
-            user_id, TaskListArchiveFilter.ACTIVE
+        active = await self.task_list_repo.list_for_user(
+            user_id, TaskListListing(archived=TaskListArchiveFilter.ACTIVE)
         )
+        return list(active.task_lists)
 
     @transactional
     async def archive_task_list(
