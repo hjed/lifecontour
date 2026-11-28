@@ -25,6 +25,7 @@ import type { TaskReadResponse } from '../../src/types/tasks';
 import { TestDataManager, utcDayOffset } from './data-management';
 import { test, expect, type TestJournal } from './fixtures';
 import { chooseDueJournal, submitRetarget } from './utils/retarget-dialog';
+import { expectInsideRow, expectTextNotClipped } from './utils/task-row-layout';
 
 /** A task's text, made unique so a leftover row can never satisfy an assertion. */
 function taskText(what: string): string {
@@ -1141,8 +1142,12 @@ test.describe('Journal Task Surface — flag and icon', () => {
     const row = page
       .getByTestId('journal-tasks-group-created')
       .getByTestId(`journal-task-${flagged.id}`);
-    await expect(row.getByTestId('journal-task-icon')).toHaveText('Tent icon');
-    await expect(row.getByRole('img', { name: 'Flagged' })).toBeVisible();
+    const icon = row.getByTestId('journal-task-icon');
+    const flag = row.getByRole('img', { name: 'Flagged' });
+    await expect(icon).toHaveText('Tent icon');
+    await expect(flag).toBeVisible();
+    await expectTextNotClipped(row.getByTestId('journal-task-text'));
+    await expectInsideRow(row, [icon, flag]);
 
     const plainRow = page
       .getByTestId('journal-tasks-group-created')

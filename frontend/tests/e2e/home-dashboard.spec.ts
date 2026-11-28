@@ -26,6 +26,7 @@ import {
   SUMMARY_INVALIDATION_GROUP,
   waitForDomainEventsSettled,
 } from './utils/domain-events';
+import { expectInsideRow, expectTextNotClipped } from './utils/task-row-layout';
 
 /**
  * Home Dashboard — page shell (ITER18-004 Phase 3)
@@ -1656,10 +1657,12 @@ test.describe('Home Dashboard — the tasks card', () => {
     await openDashboard(page);
 
     const row = tasksList(page).getByTestId(`dashboard-task-${task.id}`);
-    await expect(row.getByTestId('dashboard-task-icon')).toHaveText(
-      'Tent icon'
-    );
-    await expect(row.getByRole('img', { name: 'Flagged' })).toBeVisible();
+    const icon = row.getByTestId('dashboard-task-icon');
+    const flag = row.getByRole('img', { name: 'Flagged' });
+    await expect(icon).toHaveText('Tent icon');
+    await expect(flag).toBeVisible();
+    await expectTextNotClipped(row.getByTestId('dashboard-task-text'));
+    await expectInsideRow(row, [icon, flag]);
 
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
