@@ -4120,15 +4120,92 @@ passed, 7 MeiliSearch skips).
 - [ ] Rows show a recurrence marker; setting, changing and clearing recurrence emit events and appear in task history, which also shows the chain; MCP can set, change and clear it.
 - [ ] E2E covers complete → next copy dated by interval, and un-tick leaving no stray copy, on Firefox and Mobile Chrome.
 
-#### Phase 1: Schema and entity 🚧 IN PROGRESS
+#### Phase 1: Schema and entity ✅ DONE
 
-**Status:** 🚧 In progress — delivered as a three-layer stack: migration, entity, repository.
+**Status:** ✅ Done — delivered as a three-PR native stack (user decision): migration, entity, repository.
 **Prerequisites:** ITER21-001.
-**Estimated diff:** ~110 production → **~600 tracked**
+**Estimated diff:** ~110 production → **~600 tracked** · **Actual:** ~410 production → **~1,560
+tracked** (1,560 insertions, 20 deletions excluding this document: 411 production — migration 146,
+value objects and entity 179, repository 86; 1,113 tests; 36 architecture docs). Layers: migration
+~690, entity ~365, repository ~505. Production ran ×3.7 on the estimate: the estimate priced the
+columns, not a value-object module, the repository mapping both ways, or a migration docstring
+carrying the FK decisions. Tracked landed at ×3.8 production, under the ×4 multiplier. Phases 2–8
+are priced on a schema that now exists, so their estimates stand.
 
 **Acceptance Criteria:**
 
-- [ ] Recurrence setting (mode, interval, series) and "recurrence of" link; list tasks only.
+- [x] Recurrence setting (mode, interval, series) and "recurrence of" link; list tasks only.
+
+**Delivered:**
+- Migration `0150_add_recurrence_to_tasks.py`: `recurrence_mode` (`no_date` / `interval` /
+  `series`, NULL = not recurring), `recurrence_interval_count` + `recurrence_interval_unit`
+  (`day`/`week`/`month`/`year`), `recurrence_series_id` (UUID, FK → `journal_series`, `ON DELETE
+  RESTRICT`), `recurrence_of_task_id` (FK → `tasks`, `ON DELETE SET NULL`). CHECKs
+  `ck_tasks_recurrence_only_on_list` (invariant 6, its list half), `_mode`,
+  `_interval_matches_mode`, `_interval_unit`, `_interval_count_positive`, `_series_matches_mode`,
+  `_of_not_self`; partial indexes `ix_tasks_recurrence_series_id` and
+  `ix_tasks_recurrence_of_task_id`; the downgrade refuses while any task recurs or records its
+  original.
+- `core_shared/models/tasks/task_recurrence.py`: `NoDateRecurrence`, `IntervalRecurrence(interval)`
+  and `SeriesRecurrence(series_id: UUID)`, frozen, each naming its `RecurrenceMode`;
+  `RecurrenceInterval(count ≥ 1, unit: RecurrenceIntervalUnit)`; the `TaskRecurrence` alias and
+  `TASK_RECURRENCE_TYPES` for runtime checks. `Task` gains `recurrence` (list tasks only) and
+  `recurrence_of_task_id` (positive, never the task itself).
+- `SqlTaskRepository` reads the five columns (`_row_to_recurrence`) and writes the setting through
+  `recurrence_columns()` — every column on every write, so a mode change clears the old mode's
+  columns. Both inserts write `recurrence_of_task_id`; the list insert and `_update` write the
+  setting; `_update` never writes `recurrence_of_task_id`. No REST, MCP, event or UI contract
+  changed, and nothing sets recurrence yet.
+
+**Tests:** unit `tests/unit/tasks/test_task_recurrence.py` (interval units and refusals, value
+object type checks, pinned stored keys), `test_task_entity.py::TestRecurrence` /
+`TestRecurrenceOf`, `test_task_row_mapping.py::TestRecurrenceMapping` (each mode both ways);
+integration `tests/integration/tasks/test_task_recurrence_constraints.py` (each accepted shape; one
+refusal per CHECK naming it; unknown series and original `23503`; series delete `23001`; original
+delete nulls the link), `test_task_recurrence_migration.py` (round trip; downgrade refused for a
+recurring task and for a linked copy), `test_task_repository_recurrence_integration.py` (every
+mode and unit through insert, `find_by_id` and `find_by_id_for_update`; change, clear and keep on a
+status edit; the link written by both inserts and never by an update; second-user update writes
+nothing). `create_list_task` gains `recurrence` and `recurrence_of_task_id`; `seed_series` is new.
+No E2E: no UI. Gates run locally: ruff format/check and mypy (backend, core_shared), backend unit
+suite (6,408 passed), core_shared (924), the full backend integration suite (5,552 passed, 7
+pre-existing MeiliSearch skips) and pre-commit.
+
+**Decisions (recorded during implementation):**
+- **Three value objects in a union**, not one dataclass with optional fields: a mode cannot carry
+  another mode's data. Every `match` over it ends in `assert_never`.
+- **Count + unit**, not a PostgreSQL `interval`, which would normalise "2 weeks" and has no
+  month-end rule.
+- **Series FK `RESTRICT`**: `SET NULL` would fail the series CHECK; the fallback to *no date* is a
+  change with history, made by the series services (Phase 6). Series are hard-deleted by
+  `SqlJournalSeriesRepository.delete`, from both the delete and merge services.
+- **"Recurrence of" `SET NULL`, not unique, not list-only.** A copy outlives its original; an
+  original that kept a changed copy can recur again; a copy has no creating journal, so it can
+  never become journal-only, and the entity allows the link on any task.
+- **`save()` writes the setting on insert and update** (ITER21-001 Phase 10's rule for due date,
+  flag and icon); **the link on insert only** — nothing rewrites a copy's past.
+- **Delivered as three stacked PRs** rather than one (user decision), to keep each PR near 700 lines.
+
+**Notes for later phases:**
+- *Phase 2 / Phase 8:* the interval count has no upper bound; the API surface must bound it so
+  month and year arithmetic cannot pass `date.max`.
+- *Phase 3:* `save()` places an inserted list task at the **bottom**; "same position" needs a
+  position-keeping insert. Owner-check the original. The entity and `recurrence_columns` are ready
+  for the copy. The copy's created event must carry `recurrence_of_task_id`: the column is
+  `SET NULL` once the original is deleted, so the event is the chain's lasting record.
+- *Phase 4:* "did not recur — no next *series* journal" needs a stored marker (and probably the
+  series name, which can later be deleted); Phase 4 adds its own migration.
+- *Phase 5:* one original can have several copies; "its copy" is the not-done one with
+  `recurrence_of_task_id` = the original (indexed). A reorder does not bump `updated_at`, so
+  "untouched" cannot rest on it alone.
+- *Phase 6:* a closed task keeps its setting, so series merge and delete must re-point or fall back
+  **closed** tasks too, before the series row goes, or `RESTRICT` refuses (`23001`).
+- *Phase 7:* `_REMOVE_FROM_LIST` and `_KEEP_RELEASED` must clear the recurrence columns in the same
+  statement, or `ck_tasks_recurrence_only_on_list` refuses (`23514`).
+- *Phase 8:* the series FK is single-column; check the series is the user's.
+- *Phase 10:* read the chain in history from the copies' created events, not only from
+  `recurrence_of_task_id`, which forgets a deleted original.
+- *ITER21-007 Phase 15:* invariant 6's ordinary-list half is still to add.
 
 #### Phase 2: Interval arithmetic and the suggested interval
 

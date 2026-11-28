@@ -9,11 +9,27 @@ stub; everything else needs a real database and lives in the integration suite.
 
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
+from typing import Any
+from uuid import UUID
 
 import pytest
-from core_shared.models.tasks import Task, TaskIcon, TaskStatus
+from core_shared.models.tasks import (
+    IntervalRecurrence,
+    NoDateRecurrence,
+    RecurrenceInterval,
+    RecurrenceIntervalUnit,
+    SeriesRecurrence,
+    Task,
+    TaskIcon,
+    TaskRecurrence,
+    TaskStatus,
+)
 
-from app.core.tasks.adapters.sql.task_repository import _TASK_COLUMN_NAMES, _row_to_task
+from app.core.tasks.adapters.sql.task_repository import (
+    _TASK_COLUMN_NAMES,
+    _row_to_task,
+    recurrence_columns,
+)
 
 
 def _row(**overrides: object) -> SimpleNamespace:
@@ -30,6 +46,11 @@ def _row(**overrides: object) -> SimpleNamespace:
         "due_date": None,
         "flagged": False,
         "icon": None,
+        "recurrence_mode": None,
+        "recurrence_interval_count": None,
+        "recurrence_interval_unit": None,
+        "recurrence_series_id": None,
+        "recurrence_of_task_id": None,
         "created_at": datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
         "updated_at": datetime(2026, 8, 2, 10, 30, tzinfo=UTC),
     }
@@ -125,5 +146,84 @@ class TestRowToListTask:
     def test_the_list_columns_are_declared(self) -> None:
         """Every query selects the new columns through the one declared list."""
         assert {"task_list_id", "position", "due_date", "flagged", "icon"} <= set(
+            _TASK_COLUMN_NAMES
+        )
+
+
+_SERIES_ID = UUID(int=9)
+# Each recurrence with the columns that store it.
+_STORED_RECURRENCES: list[tuple[TaskRecurrence, dict[str, Any]]] = [
+    (
+        NoDateRecurrence(),
+        {
+            "recurrence_mode": "no_date",
+            "recurrence_interval_count": None,
+            "recurrence_interval_unit": None,
+            "recurrence_series_id": None,
+        },
+    ),
+    (
+        IntervalRecurrence(
+            interval=RecurrenceInterval(count=3, unit=RecurrenceIntervalUnit.MONTH)
+        ),
+        {
+            "recurrence_mode": "interval",
+            "recurrence_interval_count": 3,
+            "recurrence_interval_unit": "month",
+            "recurrence_series_id": None,
+        },
+    ),
+    (
+        SeriesRecurrence(series_id=_SERIES_ID),
+        {
+            "recurrence_mode": "series",
+            "recurrence_interval_count": None,
+            "recurrence_interval_unit": None,
+            "recurrence_series_id": _SERIES_ID,
+        },
+    ),
+]
+_LIST_COLUMNS: dict[str, Any] = {
+    "creating_journal_id": None,
+    "due_journal_id": None,
+    "task_list_id": 5,
+    "position": 0,
+}
+
+
+@pytest.mark.unit
+class TestRecurrenceMapping:
+    """The recurrence columns of migration 0150, both ways."""
+
+    @pytest.mark.parametrize(("recurrence", "columns"), _STORED_RECURRENCES)
+    def test_each_stored_mode_reads_as_its_value_object(
+        self, recurrence: TaskRecurrence, columns: dict[str, Any]
+    ) -> None:
+        task = _row_to_task(_row(**_LIST_COLUMNS, **columns))
+
+        assert task.recurrence == recurrence
+
+    @pytest.mark.parametrize(("recurrence", "columns"), _STORED_RECURRENCES)
+    def test_each_value_object_writes_its_columns(
+        self, recurrence: TaskRecurrence, columns: dict[str, Any]
+    ) -> None:
+        assert recurrence_columns(recurrence) == columns
+
+    def test_no_recurrence_writes_null_columns(self) -> None:
+        assert set(recurrence_columns(None).values()) == {None}
+
+    def test_a_non_recurring_row_maps_to_none(self) -> None:
+        task = _row_to_task(_row())
+
+        assert task.recurrence is None
+        assert task.recurrence_of_task_id is None
+
+    def test_the_original_of_a_copy_is_carried(self) -> None:
+        task = _row_to_task(_row(**_LIST_COLUMNS, recurrence_of_task_id=3))
+
+        assert task.recurrence_of_task_id == 3
+
+    def test_the_recurrence_columns_are_declared(self) -> None:
+        assert {*recurrence_columns(None), "recurrence_of_task_id"} <= set(
             _TASK_COLUMN_NAMES
         )
