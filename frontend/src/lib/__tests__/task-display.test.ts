@@ -13,6 +13,7 @@ import {
   deleteTaskDescription,
   lapseWording,
   linkRemovable,
+  openTasksSummary,
   overdueWording,
   retargetAction,
   statusActions,
@@ -20,6 +21,7 @@ import {
   statusWording,
   tasksDueWording,
 } from '@/lib/task-display';
+import { createMockListTaskRead } from '@/test-utils/tasks';
 import { LapseReason, TaskLinkRole, TaskStatus } from '@/types/tasks';
 
 describe('statusWording', () => {
@@ -539,5 +541,33 @@ describe('tasksDueWording', () => {
     // one a screen-reader user hears on its own, so it has to carry the subject
     // the sighted layout supplies.
     expect(tasksDueWording(2)).toContain('in this journal');
+  });
+});
+
+describe('openTasksSummary', () => {
+  const open = (overdue = false) =>
+    createMockListTaskRead({ status: TaskStatus.NOT_DONE, overdue });
+
+  it('counts the open tasks', () => {
+    expect(openTasksSummary([open(), open(), open()])).toBe('3 open');
+  });
+
+  it('adds the overdue ones when there are any', () => {
+    expect(openTasksSummary([open(true), open(), open()])).toBe(
+      '3 open · 1 overdue'
+    );
+  });
+
+  it('counts neither a ticked task nor its overdue flag before the refetch drops it', () => {
+    const ticked = createMockListTaskRead({
+      status: TaskStatus.DONE,
+      overdue: true,
+    });
+
+    expect(openTasksSummary([ticked, open()])).toBe('1 open');
+  });
+
+  it('says none are open for an empty list', () => {
+    expect(openTasksSummary([])).toBe('0 open');
   });
 });

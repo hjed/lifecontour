@@ -1,6 +1,10 @@
-import type { Locator, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
+import {
+  expectNoHorizontalScroll,
+  expectTouchTarget,
+} from './utils/phone-layout';
 
 /**
  * The task icon picker, in a real browser, before any product page embeds it.
@@ -12,7 +16,6 @@ import { test, expect } from './fixtures';
  */
 
 const HARNESS = '/e2e-harness/task-icon-picker';
-const MIN_TOUCH_TARGET = 44;
 /** The `gap-2` between the search field and its status message. */
 const ROW_GAP = 8;
 
@@ -34,16 +37,6 @@ const pickerText = (page: Page, text: string) =>
   page.getByTestId('task-icon-picker-harness').getByText(text, { exact: true });
 const tile = (page: Page, name: string) =>
   iconGroup(page).getByRole('radio', { name, exact: true });
-
-/** Layout places a 44px tile on a fractional grid track, so compare to 0.1px. */
-const toTenthPx = (px: number) => Math.round(px * 10) / 10;
-
-async function expectTouchTarget(target: Locator) {
-  const box = await target.boundingBox();
-  expect(box).not.toBeNull();
-  expect(toTenthPx(box!.width)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-  expect(toTenthPx(box!.height)).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-}
 
 /**
  * Radix moves focus on a timeout after the keydown, and an arrow checks the
@@ -123,11 +116,7 @@ test.describe('Task icon picker', () => {
     test('has no horizontal scroll and 44px targets', async ({ page }) => {
       await openPicker(page);
 
-      const overflow = await page.evaluate(() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        clientWidth: document.documentElement.clientWidth,
-      }));
-      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+      await expectNoHorizontalScroll(page);
 
       await expectTouchTarget(searchField(page));
       const tiles = iconGroup(page).getByRole('radio');
