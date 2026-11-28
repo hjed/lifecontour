@@ -39,7 +39,6 @@ from app.core.history.services.task_list_history_service import (
 from app.core.journal.adapters.sql.journal_repository import SqlJournalRepository
 from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
 from app.core.tasks.services.task_list_service import TaskListService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
@@ -57,6 +56,7 @@ from tests.journal_service_factory import (
     build_journal_service,
     build_task_journal_merge_service,
 )
+from tests.task_list_service_factory import build_task_list_service
 
 LIST_ENTITY_TYPE = "task_list"
 LIST_NAME = "Groceries"
@@ -64,11 +64,7 @@ LIST_NAME = "Groceries"
 
 def _list_service(conn: AsyncConnection) -> TaskListService:
     """The real service over the real adapter and publisher on one connection."""
-    return TaskListService(
-        task_list_repo=SqlTaskListRepository(conn),
-        task_repo=SqlTaskRepository(conn),
-        event_publisher=OutboxEventPublisher(conn),
-    )
+    return build_task_list_service(conn)
 
 
 async def _list_history(conn: AsyncConnection, list_id: int) -> list[FieldHistoryEntry]:

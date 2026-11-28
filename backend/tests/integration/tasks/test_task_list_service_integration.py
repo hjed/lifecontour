@@ -70,6 +70,7 @@ from tests.integration.tasks.task_seeding import (
     task_exists,
     task_list_events,
 )
+from tests.task_list_service_factory import build_task_list_service
 
 pytestmark = pytest.mark.integration
 
@@ -78,11 +79,7 @@ _COUNT_LISTS = "SELECT COUNT(*) FROM task_lists WHERE user_id = :user_id"
 
 
 def make_service(conn: AsyncConnection) -> TaskListService:
-    return TaskListService(
-        task_list_repo=SqlTaskListRepository(conn),
-        task_repo=SqlTaskRepository(conn),
-        event_publisher=OutboxEventPublisher(conn),
-    )
+    return build_task_list_service(conn)
 
 
 def make_read_service(conn: AsyncConnection) -> TaskListReadService:

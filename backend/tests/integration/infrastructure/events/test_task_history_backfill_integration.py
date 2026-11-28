@@ -46,7 +46,6 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_patch import TaskListPatch
-from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.history_projection_consumer import (
     HistoryProjectionConsumer,
@@ -63,6 +62,7 @@ from tests.integration.tasks.task_seeding import (
     create_contact,
     create_journal,
 )
+from tests.task_list_service_factory import build_task_list_service
 
 TASK_TEXT = "Book the venue"
 
@@ -290,11 +290,7 @@ class TestTheBackfillRepairsTaskListHistory:
         stream_client: StreamClient,
         redis_client: Redis,
     ) -> None:
-        lists = TaskListService(
-            task_list_repo=SqlTaskListRepository(async_connection),
-            task_repo=SqlTaskRepository(async_connection),
-            event_publisher=OutboxEventPublisher(async_connection),
-        )
+        lists = build_task_list_service(async_connection)
         created = await lists.create_task_list(
             user_id=USER_ID,
             name="Groceries",

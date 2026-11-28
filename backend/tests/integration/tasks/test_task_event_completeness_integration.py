@@ -74,8 +74,6 @@ from app.core.journal.services.journal_merge_service import JournalMergeService
 from app.core.tasks.adapters.sql.task_contact_repository import (
     SqlTaskContactRepository,
 )
-from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.models.events import contact_field_name
 from app.core.tasks.models.repositories import (
     TaskAnchorRepository,
@@ -85,7 +83,6 @@ from app.core.tasks.models.repositories import (
 from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
 )
-from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.history_projection_consumer import (
     TASK_HISTORY_EVENT_TYPES,
@@ -107,6 +104,7 @@ from tests.journal_service_factory import (
     build_journal_service,
     build_task_journal_merge_service,
 )
+from tests.task_list_service_factory import build_task_list_service
 
 TASK_TEXT = "book the belay course"
 UPDATED_TEXT = "book the belay course and the refresher"
@@ -648,11 +646,7 @@ async def _seed_list_with_a_task_it_keeps(fixtures: _Fixtures) -> Seeded:
 
 async def _act_delete_the_list(fixtures: _Fixtures, seeded: Seeded) -> None:
     """A write reached from the list service rather than ``TaskService``."""
-    await TaskListService(
-        task_list_repo=SqlTaskListRepository(fixtures.connection),
-        task_repo=SqlTaskRepository(fixtures.connection),
-        event_publisher=OutboxEventPublisher(fixtures.connection),
-    ).delete_task_list(
+    await build_task_list_service(fixtures.connection).delete_task_list(
         user_id=USER_ID,
         task_list_id=seeded.task_list_id,
         transaction=fixtures.connection,

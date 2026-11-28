@@ -46,12 +46,9 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 from app.core.tasks.adapters.sql.task_contact_repository import (
     SqlTaskContactRepository,
 )
-from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_contact_merge_service import (
     TaskContactMergeService,
 )
-from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_service import TaskService
 from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from tests.integration.concurrency_helpers import overlap
@@ -71,6 +68,7 @@ from tests.integration.tasks.task_seeding import (
     task_state,
 )
 from tests.journal_service_factory import build_task_journal_merge_service
+from tests.task_list_service_factory import build_task_list_service
 
 pytestmark = pytest.mark.integration
 
@@ -182,11 +180,7 @@ async def _snapshot(conn: AsyncConnection, s: Seeded) -> tuple[object, ...]:
 
 
 async def _unarchive(conn: AsyncConnection, s: Seeded) -> None:
-    await TaskListService(
-        task_list_repo=SqlTaskListRepository(conn),
-        task_repo=SqlTaskRepository(conn),
-        event_publisher=OutboxEventPublisher(conn),
-    ).unarchive_task_list(
+    await build_task_list_service(conn).unarchive_task_list(
         user_id=USER_ID, task_list_id=s.task_list_id, transaction=conn
     )
 
@@ -362,11 +356,7 @@ async def committed_list_task(
 
 def _archive(owner: str, task_list_id: int) -> Callable[[AsyncConnection], Any]:
     async def run(connection: AsyncConnection) -> None:
-        await TaskListService(
-            task_list_repo=SqlTaskListRepository(connection),
-            task_repo=SqlTaskRepository(connection),
-            event_publisher=OutboxEventPublisher(connection),
-        ).archive_task_list(
+        await build_task_list_service(connection).archive_task_list(
             user_id=owner, task_list_id=task_list_id, transaction=connection
         )
 
