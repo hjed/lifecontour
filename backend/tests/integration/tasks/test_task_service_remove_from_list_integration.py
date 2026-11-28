@@ -49,11 +49,9 @@ from app.core.settings.adapters.sql.user_settings_repository import (
     SqlUserSettingsRepository,
 )
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
 from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.concurrency_helpers import (
     backend_pid,
@@ -82,6 +80,7 @@ from tests.integration.tasks.task_seeding import (
 )
 from tests.journal_service_factory import build_journal_service
 from tests.task_event_inventory import task_event_types, task_list_event_types
+from tests.task_list_service_factory import build_task_list_service
 
 pytestmark = pytest.mark.integration
 
@@ -532,11 +531,7 @@ def _deleting_list(owner: str, task_list_id: int) -> Step:
 
 
 def _list_service(connection: AsyncConnection) -> TaskListService:
-    return TaskListService(
-        task_list_repo=SqlTaskListRepository(connection),
-        task_repo=SqlTaskRepository(connection),
-        event_publisher=OutboxEventPublisher(connection),
-    )
+    return build_task_list_service(connection)
 
 
 def _deleting_journal(journal_id: int) -> Step:

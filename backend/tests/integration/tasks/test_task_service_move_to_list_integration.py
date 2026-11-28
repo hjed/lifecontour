@@ -46,10 +46,8 @@ from app.core.settings.adapters.sql.user_settings_repository import (
 )
 from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
 from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
-from app.core.tasks.services.task_list_service import TaskListService
 from app.core.tasks.services.task_read_service import TaskReadService
 from app.core.tasks.services.task_service import TaskService
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.unit_of_work import unit_of_work
 from tests.integration.concurrency_helpers import (
     backend_pid,
@@ -78,6 +76,7 @@ from tests.integration.tasks.task_seeding import (
     task_events,
 )
 from tests.task_event_inventory import task_event_types
+from tests.task_list_service_factory import build_task_list_service
 
 pytestmark = pytest.mark.integration
 
@@ -355,11 +354,7 @@ def _moving(
 
 def _archiving(owner: str, task_list_id: int) -> Step:
     async def run(connection: AsyncConnection) -> None:
-        await TaskListService(
-            task_list_repo=SqlTaskListRepository(connection),
-            event_publisher=OutboxEventPublisher(connection),
-            task_repo=SqlTaskRepository(connection),
-        ).archive_task_list(
+        await build_task_list_service(connection).archive_task_list(
             user_id=owner, task_list_id=task_list_id, transaction=connection
         )
 

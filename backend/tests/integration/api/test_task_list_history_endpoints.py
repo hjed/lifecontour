@@ -23,10 +23,6 @@ from app.core.history.adapters.sql.field_history_repository import (
     SqlFieldHistoryRepository,
 )
 from app.core.history.services.history_service import HistoryService
-from app.core.tasks.adapters.sql.task_list_repository import SqlTaskListRepository
-from app.core.tasks.adapters.sql.task_repository import SqlTaskRepository
-from app.core.tasks.services.task_list_service import TaskListService
-from app.infrastructure.events.outbox_event_publisher import OutboxEventPublisher
 from app.infrastructure.events.outbox_repository import OutboxEvent
 from tests.integration.tasks.task_seeding import (
     ARCHIVED_AT_EXAMPLE,
@@ -35,6 +31,7 @@ from tests.integration.tasks.task_seeding import (
     seed_task_list,
     seed_task_list_history,
 )
+from tests.task_list_service_factory import build_task_list_service
 
 pytestmark = pytest.mark.integration
 
@@ -235,11 +232,7 @@ class TestARealDeleteEndsTheListsHistory:
         self, authenticated_client: AsyncClient, async_connection: AsyncConnection
     ) -> None:
         foreign_id = await _foreign_list(async_connection, with_history=True)
-        await TaskListService(
-            task_list_repo=SqlTaskListRepository(async_connection),
-            task_repo=SqlTaskRepository(async_connection),
-            event_publisher=OutboxEventPublisher(async_connection),
-        ).delete_task_list(
+        await build_task_list_service(async_connection).delete_task_list(
             user_id=OTHER_USER_ID,
             task_list_id=foreign_id,
             transaction=async_connection,
