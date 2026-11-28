@@ -20,6 +20,7 @@ from core_shared.models.history import Provenance
 from core_shared.models.tasks import (
     TaskListArchiveFilter,
     TaskListListing,
+    TaskListPageWindow,
     TaskListValidationError,
 )
 from dishka import FromDishka
@@ -27,8 +28,12 @@ from dishka.integrations.fastapi import inject
 from fastapi import APIRouter, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.api.common.identifiers import DatabaseIdPath
-from app.api.common.schemas import get_request_base_url
+from app.api.common.identifiers import INT32_MAX, DatabaseIdPath
+from app.api.common.schemas import (
+    create_pagination_links,
+    create_pagination_meta,
+    get_request_base_url,
+)
 from app.api.history import HistoryListResponse
 from app.api.history.pages import (
     HistoryLimitQuery,
@@ -48,6 +53,7 @@ from app.api.tasks.task_list_schemas import (
     TaskListMoveRequest,
     TaskListResponse,
     TaskListSummaryCollectionResponse,
+    TaskListSummaryPageResponse,
     TaskListUpdateRequest,
     to_task_list_resource,
     to_task_list_summary_resource,
@@ -61,6 +67,8 @@ from app.core.tasks.services.task_read_service import TaskReadService
 from app.infrastructure.auth.models import SessionUser
 
 router = APIRouter(tags=["tasks"])
+
+DEFAULT_TASK_LIST_PAGE_SIZE = 20
 
 
 @router.post("/task-lists", status_code=status.HTTP_201_CREATED)
@@ -109,22 +117,73 @@ async def list_task_lists(
             )
         ),
     ] = TaskListArchiveFilter.ACTIVE,
-) -> TaskListSummaryCollectionResponse:
-    """List your task lists, filtered by archived state.
+    name: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Only lists whose name contains this, ignoring case; % and _ "
+                "match themselves"
+            )
+        ),
+    ] = None,
+    page: Annotated[
+        int | None,
+        Query(
+            description="Page number; asking for a page or limit pages the answer",
+            ge=1,
+            le=INT32_MAX,
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        Query(description="Lists per page (1-100, default 20)", ge=1, le=100),
+    ] = None,
+) -> TaskListSummaryCollectionResponse | TaskListSummaryPageResponse:
+    """List your task lists, filtered by archived state and, optionally, name.
 
     Each list carries ``open_task_count``: how many of its tasks are not done.
 
+    Unpaged by default: every matching list, as ``data`` alone. Passing
+    ``page`` or ``limit`` pages the answer (page 1, 20 a page unless given),
+    with ``meta`` carrying the total and ``links`` the neighbouring pages. A
+    page past the end is an ordinary empty answer and still reports the total.
+
     Raises:
-        400: An unknown ``archived`` value.
+        400: An unknown ``archived`` value, a ``page`` outside 1 to the
+             ``INTEGER`` range, a ``limit`` outside 1–100, or a ``name`` that
+             is blank or longer than a list name can be (``TASK_VALIDATION_ERROR``,
+             field ``name``).
     """
+    paged = page is not None or limit is not None
+    page_number, page_size = page or 1, limit or DEFAULT_TASK_LIST_PAGE_SIZE
     listed = await task_list_read_service.list_task_lists(
-        user_id=user.id, listing=TaskListListing(archived=archived)
+        user_id=user.id,
+        listing=TaskListListing(
+            archived=archived,
+            name_contains=name,
+            page=(
+                TaskListPageWindow(
+                    limit=page_size, offset=history_offset(page_number, page_size)
+                )
+                if paged
+                else None
+            ),
+        ),
     )
     base_url = get_request_base_url(request)
-    return TaskListSummaryCollectionResponse(
-        data=[
-            to_task_list_summary_resource(each, base_url) for each in listed.summaries
-        ]
+    data = [to_task_list_summary_resource(each, base_url) for each in listed.summaries]
+    if not paged:
+        return TaskListSummaryCollectionResponse(data=data)
+    return TaskListSummaryPageResponse(
+        data=data,
+        meta=create_pagination_meta(listed.total, page_number, page_size),
+        links=create_pagination_links(
+            f"{base_url}/api/task-lists",
+            page_number,
+            page_size,
+            listed.total,
+            {"archived": archived.value, **({} if name is None else {"name": name})},
+        ),
     )
 
 

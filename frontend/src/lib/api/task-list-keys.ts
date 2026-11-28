@@ -26,6 +26,14 @@ import type { TaskListArchiveFilter } from '@/types/task-lists';
 /** What the listing is asked for. An object, so later filters extend it. */
 export interface TaskListListingParams {
   archived: TaskListArchiveFilter;
+  /** Only lists whose name contains this, ignoring case; trimmed, and left out when blank. */
+  name?: string;
+}
+
+/** What the archived lists page asks for, a page at a time. */
+export interface ArchivedTaskListPagesParams {
+  name?: string;
+  limit: number;
 }
 
 export const taskListKeys = {
@@ -34,6 +42,13 @@ export const taskListKeys = {
   listings: () => [...taskListKeys.all, 'listing'] as const,
   listing: (params: TaskListListingParams) =>
     [...taskListKeys.listings(), params] as const,
+  /**
+   * The archived lists page's paged listing. Under `listings()`, so every
+   * list write's refresh reaches it, and apart from `listing(...)`, whose
+   * cache holds one answer rather than pages.
+   */
+  archivedPages: (params: ArchivedTaskListPagesParams) =>
+    [...taskListKeys.listings(), 'archived-pages', params] as const,
   details: () => [...taskListKeys.all, 'detail'] as const,
   detail: (listId: string) => [...taskListKeys.details(), listId] as const,
 };

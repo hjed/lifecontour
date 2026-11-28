@@ -34,6 +34,8 @@ from tests.integration.tasks.task_seeding import (
 pytestmark = pytest.mark.integration
 
 ARCHIVED_AT = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
+ARCHIVED_EARLIER = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+ARCHIVED_LATER = datetime(2026, 11, 20, 9, 0, tzinfo=UTC)
 _COUNT_LISTS = "SELECT COUNT(*) FROM task_lists WHERE user_id = :user_id"
 
 
@@ -776,6 +778,111 @@ class TestListTaskListsEndpoint:
 
         assert "Theirs" not in _names(response.json())
         assert "Theirs archived" not in _names(response.json())
+
+
+class TestListTaskListsByNameInPages:
+    """The archived page's listing: a name filter, and pages with a total.
+
+    The filter and paging rules are the repository's and are proven there;
+    these hold the REST surface to its shape, its refusals and its owner.
+    """
+
+    async def test_a_filtered_page_answers_the_slice_with_pagination(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        for name, archived_at in (
+            ("Pack 1", ARCHIVED_EARLIER),
+            ("Pack 2", ARCHIVED_AT),
+            ("Groceries", ARCHIVED_AT),
+            ("Pack 3", ARCHIVED_LATER),
+        ):
+            await seed_task_list(async_connection, name, archived_at=archived_at)
+
+        response = await authenticated_client.get(
+            "/api/task-lists",
+            params={"archived": "archived", "name": "PACK", "page": 2, "limit": 2},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert _names(body) == ["Pack 1"]
+        assert body["meta"] == {
+            "total_count": 3,
+            "page_count": 2,
+            "current_page": 2,
+            "per_page": 2,
+        }
+        assert body["links"]["prev"].endswith(
+            "/api/task-lists?page=1&limit=2&archived=archived&name=PACK"
+        )
+        assert body["links"]["next"] is None
+
+    async def test_an_unpaged_listing_carries_no_pagination(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        await seed_task_list(async_connection, "Packing")
+
+        response = await authenticated_client.get(
+            "/api/task-lists", params={"name": "pack"}
+        )
+
+        assert response.status_code == 200
+        assert set(response.json()) == {"data"}
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param({"page": 0}, id="page-zero"),
+            pytest.param({"page": INT32_MAX + 1}, id="page-past-int32"),
+            pytest.param({"limit": 0}, id="limit-zero"),
+            pytest.param({"limit": 101}, id="limit-over-100"),
+            pytest.param({"page": "two"}, id="page-not-a-number"),
+        ],
+    )
+    async def test_an_out_of_range_page_or_limit_is_a_bad_request(
+        self, authenticated_client: AsyncClient, params: dict[str, int | str]
+    ) -> None:
+        response = await authenticated_client.get("/api/task-lists", params=params)
+
+        assert response.status_code == 400
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("   ", id="blank"),
+            pytest.param("n" * (MAX_TASK_LIST_NAME_LENGTH + 1), id="too-long"),
+        ],
+    )
+    async def test_a_blank_or_too_long_name_filter_is_refused_naming_the_field(
+        self, authenticated_client: AsyncClient, name: str
+    ) -> None:
+        response = await authenticated_client.get(
+            "/api/task-lists", params={"archived": "archived", "name": name}
+        )
+
+        assert response.status_code == 400
+        error = _error(response.json())
+        assert error["code"] == "TASK_VALIDATION_ERROR"
+        assert error["meta"] == {"field": "name"}
+
+    async def test_another_users_matching_lists_are_neither_listed_nor_counted(
+        self, authenticated_client: AsyncClient, async_connection: AsyncConnection
+    ) -> None:
+        await seed_task_list(async_connection, "Pack mine", archived_at=ARCHIVED_AT)
+        await seed_task_list(
+            async_connection,
+            "Pack theirs",
+            user_id=OTHER_USER_ID,
+            archived_at=ARCHIVED_AT,
+        )
+
+        response = await authenticated_client.get(
+            "/api/task-lists",
+            params={"archived": "archived", "name": "pack", "limit": 20},
+        )
+
+        assert _names(response.json()) == ["Pack mine"]
+        assert response.json()["meta"]["total_count"] == 1
 
 
 _COUNT_OUTBOX = "SELECT COUNT(*) FROM outbox_events"

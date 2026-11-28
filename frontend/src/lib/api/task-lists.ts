@@ -13,6 +13,7 @@
  */
 
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -30,6 +31,7 @@ import type {
   TaskListMoveInput,
   TaskListMoveResponse,
   TaskListResponse,
+  TaskListsPageResponse,
   TaskListsResponse,
   TaskListUpdateInput,
 } from '@/types/task-lists';
@@ -86,14 +88,39 @@ const ACTIVE_LISTING = taskListKeys.listing({ archived: 'active' });
 
 // API Functions
 
-async function fetchTaskLists({
-  archived,
-}: TaskListListingParams): Promise<TaskListsResponse> {
-  const response = await fetch(
-    `${API_ENDPOINTS.TASK_LISTS.BASE}?archived=${archived}`,
-    { credentials: 'include' }
-  );
+/** The listing's query string; a blank name is left out rather than refused. */
+function listingQuery(
+  { archived, name }: TaskListListingParams,
+  page?: { page: number; limit: number }
+): string {
+  const params = new URLSearchParams({ archived });
+  const trimmed = name?.trim();
+  if (trimmed) params.append('name', trimmed);
+  if (page) {
+    params.append('page', page.page.toString());
+    params.append('limit', page.limit.toString());
+  }
+  return `${API_ENDPOINTS.TASK_LISTS.BASE}?${params.toString()}`;
+}
+
+async function fetchTaskLists(
+  listing: TaskListListingParams
+): Promise<TaskListsResponse> {
+  const response = await fetch(listingQuery(listing), {
+    credentials: 'include',
+  });
   return readJson<TaskListsResponse>(response, ERROR_MESSAGES.FETCH_FAILED);
+}
+
+async function fetchTaskListsPage(
+  listing: TaskListListingParams,
+  page: number,
+  limit: number
+): Promise<TaskListsPageResponse> {
+  const response = await fetch(listingQuery(listing, { page, limit }), {
+    credentials: 'include',
+  });
+  return readJson<TaskListsPageResponse>(response, ERROR_MESSAGES.FETCH_FAILED);
 }
 
 async function fetchTaskList(listId: string): Promise<TaskListResponse> {
@@ -319,12 +346,45 @@ function settleListWrite(queryClient: QueryClient, listId: string): void {
  * comes most recently archived first.
  */
 export function useTaskLists(params: Partial<TaskListListingParams> = {}) {
+  const name = params.name?.trim();
   const listing: TaskListListingParams = {
     archived: params.archived ?? 'active',
+    ...(name ? { name } : {}),
   };
   return useQuery({
     queryKey: taskListKeys.listing(listing),
     queryFn: () => fetchTaskLists(listing),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+/** How many archived lists a page of the archived lists page holds. */
+export const ARCHIVED_LISTS_PAGE_SIZE = 20;
+
+/**
+ * The user's archived lists, most recently archived first, a page at a time,
+ * each with its open-task count: the archived lists page.
+ *
+ * `name` keeps lists whose name contains it, ignoring case; it is trimmed and,
+ * when blank, left out. Pages follow `meta`, so `fetchNextPage` loads the next
+ * one and `hasNextPage` turns false on the last.
+ */
+export function useArchivedTaskLists({
+  name,
+  limit = ARCHIVED_LISTS_PAGE_SIZE,
+}: { name?: string; limit?: number } = {}) {
+  const trimmed = name?.trim() || undefined;
+  return useInfiniteQuery({
+    queryKey: taskListKeys.archivedPages({ name: trimmed, limit }),
+    queryFn: ({ pageParam }) =>
+      fetchTaskListsPage(
+        { archived: 'archived', name: trimmed },
+        pageParam,
+        limit
+      ),
+    initialPageParam: 1,
+    getNextPageParam: ({ meta }) =>
+      meta.current_page < meta.page_count ? meta.current_page + 1 : undefined,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 }
@@ -544,7 +604,10 @@ export function useMoveTaskList() {
         MOVE_SCOPE,
         queryClient.getQueryState(ACTIVE_LISTING)?.fetchStatus === 'fetching'
       );
-      await queryClient.cancelQueries({ queryKey: ACTIVE_LISTING });
+      await queryClient.cancelQueries({
+        queryKey: ACTIVE_LISTING,
+        exact: true,
+      });
       const previous = queryClient
         .getQueryData<TaskListsResponse>(ACTIVE_LISTING)
         ?.data.map(entry => entry.id);

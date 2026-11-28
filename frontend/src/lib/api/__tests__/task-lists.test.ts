@@ -11,6 +11,7 @@ import {
   useCreateTaskList,
   useDeleteTaskList,
   useMoveTaskList,
+  useArchivedTaskLists,
   useTaskList,
   useTaskListHistory,
   useTaskLists,
@@ -26,6 +27,7 @@ import { createQueryTestHarness, mockApiResponse } from '@/test-utils';
 import type {
   TaskListResource,
   TaskListResponse,
+  TaskListsPageResponse,
   TaskListsResponse,
   TaskListSummaryResource,
 } from '@/types/task-lists';
@@ -166,6 +168,124 @@ describe('taskListKeys', () => {
   });
 });
 
+/** One page of a listing, as the backend pages it. */
+function listingPage(
+  currentPage: number,
+  pageCount: number,
+  ...lists: TaskListSummaryResource[]
+): TaskListsPageResponse {
+  return {
+    data: lists,
+    meta: {
+      total_count: pageCount * 20,
+      page_count: pageCount,
+      current_page: currentPage,
+      per_page: 20,
+    },
+    links: null,
+  };
+}
+
+describe('useArchivedTaskLists', () => {
+  it('asks for the first page of archived lists, most recently archived first', async () => {
+    const { wrapper } = setup();
+    mockFetch.mockResolvedValueOnce(
+      mockApiResponse(listingPage(1, 1, summary('4', 'Bali trip', 0)))
+    );
+
+    const { result } = renderHook(() => useArchivedTaskLists(), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(lastRequest().url).toBe(
+      '/api/task-lists?archived=archived&page=1&limit=20'
+    );
+    expect(lastRequest().init.credentials).toBe('include');
+    expect(result.current.data?.pages[0].data[0].attributes.name).toBe(
+      'Bali trip'
+    );
+  });
+
+  it('sends the name filter trimmed and encoded', async () => {
+    const { wrapper } = setup();
+    mockFetch.mockResolvedValueOnce(mockApiResponse(listingPage(1, 1)));
+
+    const { result } = renderHook(
+      () => useArchivedTaskLists({ name: '  Bali & Lombok ' }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(lastRequest().url).toBe(
+      '/api/task-lists?archived=archived&name=Bali+%26+Lombok&page=1&limit=20'
+    );
+  });
+
+  it('leaves a blank name out, so clearing the filter is never refused', async () => {
+    const { wrapper } = setup();
+    mockFetch.mockResolvedValueOnce(mockApiResponse(listingPage(1, 1)));
+
+    const { result } = renderHook(() => useArchivedTaskLists({ name: '   ' }), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(lastRequest().url).toBe(
+      '/api/task-lists?archived=archived&page=1&limit=20'
+    );
+  });
+
+  it('loads the next page by number until the last', async () => {
+    const { wrapper } = setup();
+    mockFetch
+      .mockResolvedValueOnce(
+        mockApiResponse(listingPage(1, 2, summary('4', 'Bali trip', 0)))
+      )
+      .mockResolvedValueOnce(
+        mockApiResponse(listingPage(2, 2, summary('2', 'Snow trip', 1)))
+      );
+
+    const { result } = renderHook(() => useArchivedTaskLists({ limit: 1 }), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.hasNextPage).toBe(true));
+    expect(lastRequest().url).toBe(
+      '/api/task-lists?archived=archived&page=1&limit=1'
+    );
+    await act(() => result.current.fetchNextPage());
+    expect(lastRequest().url).toBe(
+      '/api/task-lists?archived=archived&page=2&limit=1'
+    );
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
+    expect(
+      result.current.data?.pages.flatMap(page => page.data).map(e => e.id)
+    ).toEqual(['4', '2']);
+  });
+
+  it('keys each filter apart, under the listings every list write refreshes', async () => {
+    const { wrapper, queryClient } = setup();
+    mockFetch.mockResolvedValue(mockApiResponse(listingPage(1, 1)));
+
+    const { result } = renderHook(
+      () => useArchivedTaskLists({ name: 'trip' }),
+      { wrapper }
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(taskListKeys.archivedPages({ name: 'trip', limit: 20 })).not.toEqual(
+      taskListKeys.archivedPages({ limit: 20 })
+    );
+    expect(taskListKeys.archivedPages({ limit: 20 }).slice(0, 2)).toEqual(
+      taskListKeys.listings()
+    );
+    const requests = mockFetch.mock.calls.length;
+    await act(() =>
+      queryClient.invalidateQueries({ queryKey: taskListKeys.listings() })
+    );
+    expect(mockFetch.mock.calls.length).toBe(requests + 1);
+  });
+});
+
 describe('reads', () => {
   it('lists the active lists by default', async () => {
     const { wrapper } = setup();
@@ -179,6 +299,24 @@ describe('reads', () => {
     expect(lastRequest().url).toBe('/api/task-lists?archived=active');
     expect(lastRequest().init.credentials).toBe('include');
     expect(result.current.data?.data[0].attributes.open_task_count).toBe(2);
+  });
+
+  it('filters by name, unpaged, under its own key', async () => {
+    const { wrapper, queryClient } = setup();
+    mockFetch.mockResolvedValueOnce(mockApiResponse(listing()));
+
+    const { result } = renderHook(
+      () => useTaskLists({ archived: 'all', name: ' pack ' }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(lastRequest().url).toBe('/api/task-lists?archived=all&name=pack');
+    expect(
+      queryClient.getQueryData(
+        taskListKeys.listing({ archived: 'all', name: 'pack' })
+      )
+    ).toEqual(listing());
   });
 
   it('asks for archived lists, or all of them, by name', async () => {
@@ -630,6 +768,30 @@ describe('useMoveTaskList', () => {
     expect(invalidatedKeys(spy)).toContainEqual(
       taskListKeys.listing({ archived: 'all' })
     );
+  });
+
+  it('leaves a name-filtered active listing in flight alone', async () => {
+    const { queryClient, wrapper } = setup();
+    seedActive(queryClient);
+    const releaseFiltered = heldRequest(() =>
+      mockApiResponse(listing(summary('3', 'Trip', 5)))
+    );
+    const filtered = renderHook(() => useTaskLists({ name: 'trip' }), {
+      wrapper,
+    });
+    await waitFor(() =>
+      expect(filtered.result.current.fetchStatus).toBe('fetching')
+    );
+    mockFetch.mockResolvedValueOnce(moveAnswer('2', '3', '1'));
+
+    const { result } = renderHook(() => useMoveTaskList(), { wrapper });
+    await act(() => result.current.mutateAsync({ listId: '1', index: 2 }));
+    act(() => releaseFiltered());
+
+    await waitFor(() => expect(filtered.result.current.isSuccess).toBe(true));
+    expect(filtered.result.current.data?.data.map(entry => entry.id)).toEqual([
+      '3',
+    ]);
   });
 
   it('puts the order back when the move fails', async () => {
