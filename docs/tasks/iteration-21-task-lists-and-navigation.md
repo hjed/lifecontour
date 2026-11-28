@@ -4120,8 +4120,9 @@ passed, 7 MeiliSearch skips).
 - [ ] Rows show a recurrence marker; setting, changing and clearing recurrence emit events and appear in task history, which also shows the chain; MCP can set, change and clear it.
 - [ ] E2E covers complete → next copy dated by interval, and un-tick leaving no stray copy, on Firefox and Mobile Chrome.
 
-#### Phase 1: Schema and entity
+#### Phase 1: Schema and entity 🚧 IN PROGRESS
 
+**Status:** 🚧 In progress — delivered as a three-layer stack: migration, entity, repository.
 **Prerequisites:** ITER21-001.
 **Estimated diff:** ~110 production → **~600 tracked**
 
